@@ -6,12 +6,12 @@ import joblib
 import glob
 import os
 import sys
-import hashlib
-from io import BytesIO
 import time
+from io import BytesIO
+import datetime
 
 # =============================================================================
-# CONFIGURACIÓN GLOBAL (de tu código original)
+# CONFIGURACIÓN GLOBAL
 # =============================================================================
 
 # En lugar de None, poner un límite muy alto pero razonable
@@ -36,6 +36,16 @@ def inicializar_sesion():
         st.session_state.tipo_usuario = None
     if 'ultimos_resultados' not in st.session_state:
         st.session_state.ultimos_resultados = None
+    if 'historial_procesamientos' not in st.session_state:
+        st.session_state.historial_procesamientos = []
+    if 'estadisticas_uso' not in st.session_state:
+        st.session_state.estadisticas_uso = {
+            'total_archivos': 0,
+            'archivos_exitosos': 0,
+            'archivos_fallidos': 0,
+            'primero_uso': None,
+            'ultimo_uso': None
+        }
 
 def verificar_usuarios_configurados():
     """Verificar que hay usuarios en secrets"""
@@ -88,6 +98,9 @@ def mostrar_login():
                         st.session_state.autenticado = True
                         st.session_state.usuario_actual = usuario_user
                         st.session_state.tipo_usuario = "usuario"
+                        # Inicializar estadísticas
+                        if not st.session_state.estadisticas_uso['primero_uso']:
+                            st.session_state.estadisticas_uso['primero_uso'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         st.rerun()
                     else:
                         st.error("❌ Contraseña incorrecta")
@@ -111,6 +124,9 @@ def mostrar_login():
                         st.session_state.autenticado = True
                         st.session_state.usuario_actual = tecnico_user
                         st.session_state.tipo_usuario = "tecnico"
+                        # Inicializar estadísticas
+                        if not st.session_state.estadisticas_uso['primero_uso']:
+                            st.session_state.estadisticas_uso['primero_uso'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         st.rerun()
                     else:
                         st.error("❌ Contraseña incorrecta")
@@ -121,7 +137,7 @@ def mostrar_login():
     st.info("💡 **Nota:** Esta aplicación es de acceso restringido. Contacta al administrador para obtener credenciales.")
 
 # =============================================================================
-# CLASE PRINCIPAL - CÓDIGO ORIGINAL ADAPTADO
+# CLASE PRINCIPAL - VERSIÓN MEMORIA + LOGGING
 # =============================================================================
 
 class CMYKRGConverterSimple:
@@ -146,7 +162,7 @@ class CMYKRGConverterSimple:
         self.cargar_modelos()
     
     def cargar_modelos(self):
-        """Cargar modelos específicos para 600 y 1200 DPI - CÓDIGO ORIGINAL"""
+        """Cargar modelos específicos para 600 y 1200 DPI"""
         try:
             st.info("🔍 BUSCANDO MODELOS ESPECÍFICOS POR RESOLUCIÓN...")
             
@@ -256,7 +272,7 @@ class CMYKRGConverterSimple:
             st.error(f"❌ No hay modelo disponible para {resolucion} DPI")
     
     def detectar_dpi_real(self, img):
-        """Detectar DPI de metadatos - CÓDIGO ORIGINAL"""
+        """Detectar DPI de metadatos"""
         try:
             dpi_x, dpi_y = img.info.get('dpi', (72, 72))
             dpi_promedio = (dpi_x + dpi_y) / 2
@@ -268,7 +284,7 @@ class CMYKRGConverterSimple:
             return 300
     
     def optimizar_imagen(self, img_array):
-        """Optimizar imagen a 2,000,000 píxeles máximo (resize) - CÓDIGO ORIGINAL"""
+        """Optimizar imagen a 2,000,000 píxeles máximo (resize)"""
         height, width = img_array.shape[:2]
         total_pixels = height * width
         
@@ -341,8 +357,82 @@ class CMYKRGConverterSimple:
         
         return X_enhanced
     
-    def calcular_consumo_fisico_original(self, cmykrg_predictions, img_shape, resolucion_y, image_path):
-        """Calcular consumo físico de tinta - MISMOS CÁLCULOS QUE v0.9"""
+    def agregar_log_procesamiento(self, uploaded_file, resolucion, resultados, exito=True, error_msg=None):
+        """Agregar entrada al historial de procesamientos"""
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        log_entry = {
+            'timestamp': timestamp,
+            'usuario': st.session_state.usuario_actual,
+            'tipo_usuario': st.session_state.tipo_usuario,
+            'archivo_nombre': uploaded_file.name,
+            'archivo_tamaño': uploaded_file.size,
+            'archivo_tipo': uploaded_file.type,
+            'resolucion': resolucion,
+            'exito': exito,
+            'error_msg': error_msg,
+            'consumo_total': resultados['total_g_m2'] if resultados and exito else None,
+            'area_m2': resultados['area_m2'] if resultados and exito else None
+        }
+        
+        # Agregar al inicio para que los más recientes aparezcan primero
+        st.session_state.historial_procesamientos.insert(0, log_entry)
+        
+        # Actualizar estadísticas
+        stats = st.session_state.estadisticas_uso
+        stats['total_archivos'] += 1
+        stats['ultimo_uso'] = timestamp
+        
+        if exito:
+            stats['archivos_exitosos'] += 1
+        else:
+            stats['archivos_fallidos'] += 1
+        
+        # Mantener solo los últimos 50 registros para no sobrecargar memoria
+        if len(st.session_state.historial_procesamientos) > 50:
+            st.session_state.historial_procesamientos = st.session_state.historial_procesamientos[:50]
+    
+    def mostrar_historial_procesamientos(self):
+        """Mostrar historial de archivos procesados"""
+        if not st.session_state.historial_procesamientos:
+            st.info("📝 Aún no se han procesado archivos en esta sesión")
+            return
+        
+        st.subheader("📋 Historial de Procesamientos (Esta Sesión)")
+        
+        # Crear DataFrame para mejor visualización
+        historial_data = []
+        for log in st.session_state.historial_procesamientos[:20]:  # Mostrar últimos 20
+            historial_data.append({
+                'Fecha/Hora': log['timestamp'],
+                'Archivo': log['archivo_nombre'],
+                'Usuario': log['usuario'],
+                'Resolución': log['resolucion'],
+                'Estado': '✅ Éxito' if log['exito'] else '❌ Error',
+                'Consumo (g/m²)': f"{log['consumo_total']:.2f}" if log['consumo_total'] else 'N/A',
+                'Tamaño': f"{log['archivo_tamaño']:,} bytes"
+            })
+        
+        if historial_data:
+            df_historial = pd.DataFrame(historial_data)
+            st.dataframe(df_historial, use_container_width=True)  # ✅ CORREGIDO
+        
+        # Mostrar estadísticas
+        stats = st.session_state.estadisticas_uso
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Total Archivos", stats['total_archivos'])
+        with col2:
+            st.metric("Procesamientos Exitosos", stats['archivos_exitosos'])
+        with col3:
+            st.metric("Procesamientos Fallidos", stats['archivos_fallidos'])
+        with col4:
+            tasa_exito = (stats['archivos_exitosos'] / stats['total_archivos'] * 100) if stats['total_archivos'] > 0 else 0
+            st.metric("Tasa de Éxito", f"{tasa_exito:.1f}%")
+    
+    def calcular_consumo_fisico_original(self, cmykrg_predictions, img_shape, resolucion_y, image, filename):
+        """Calcular consumo físico de tinta - VERSIÓN MEMORIA"""
         try:
             st.info("🔍 Iniciando cálculo de consumo físico (MÉTODO v0.9)...")
             
@@ -350,18 +440,18 @@ class CMYKRGConverterSimple:
             dpi_x = float(resolucion_x)  # 600 DPI fijo en X
             dpi_y = float(resolucion_y)
             
-            # Obtener dimensiones reales de la imagen (igual que v0.9)
-            with Image.open(image_path) as img:
-                width_orig, height_orig = img.size
-                dpi_real = self.detectar_dpi_real(img)
+            # Obtener dimensiones reales de la imagen desde el objeto Image
+            width_orig, height_orig = image.size
+            dpi_real = self.detectar_dpi_real(image)
             
             # Calcular dimensiones reales en cm (igual que v0.9)
             ancho_cm = (width_orig / dpi_real) * 2.54
             alto_cm = (height_orig / dpi_real) * 2.54
             area_m2 = (ancho_cm * alto_cm) / 10000.0
 
-            st.info(f"📐 Dimensiones imagen: {width_orig} x {height_orig} píxeles")
-            st.info(f"📏 Dimensiones físicas: {ancho_cm:.1f} x {alto_cm:.1f} cm")
+            st.info(f"📐 Archivo: {filename}")
+            st.info(f"📏 Dimensiones: {width_orig} x {height_orig} píxeles")
+            st.info(f"📐 Dimensiones físicas: {ancho_cm:.1f} x {alto_cm:.1f} cm")
             st.info(f"📊 Área: {area_m2:.6f} m²")
             st.info(f"🎯 DPI real: {dpi_real}, DPI impresión: {dpi_x}x{dpi_y}")
             
@@ -425,7 +515,8 @@ class CMYKRGConverterSimple:
                 'resolucion': f"{dpi_x}x{dpi_y} DPI",
                 'consumos_detallados': consumos_detallados,
                 'dimensiones': f"{ancho_cm:.1f}x{alto_cm:.1f} cm",
-                'dpi_real': dpi_real
+                'dpi_real': dpi_real,
+                'archivo_procesado': filename
             }
 
         except Exception as e:
@@ -435,86 +526,81 @@ class CMYKRGConverterSimple:
             return None
 
     def procesar_imagen_completo(self, uploaded_file, resolucion_y):
-        """Procesamiento completo de la imagen - CÓDIGO ORIGINAL ADAPTADO"""
+        """Procesamiento COMPLETO en memoria - SIN archivos temporales"""
         try:
-            # Guardar archivo temporalmente
-            with open("temp_image.jpg", "wb") as f:
-                f.write(uploaded_file.getbuffer())
-            
             progress_bar = st.progress(0)
             status_text = st.empty()
             
             status_text.text("Cargando imagen...")
             progress_bar.progress(10)
             
-            with Image.open("temp_image.jpg") as img:
-                if img.mode != 'RGB':
-                    img = img.convert('RGB')
-                
-                status_text.text("Optimizando imagen...")
-                progress_bar.progress(30)
-                
-                img_array = np.array(img)
-                img_optimized, was_optimized = self.optimizar_imagen(img_array)
-                
-                if was_optimized:
-                    st.warning("⚠️ Imagen optimizada por tamaño")
-                
-                status_text.text("Preparando datos...")
-                progress_bar.progress(50)
-                
-                pixels = img_optimized.reshape(-1, 3)
-                
-                status_text.text("Aplicando ingeniería de características...")
-                progress_bar.progress(60)
-                
-                pixels_enhanced = self.aplicar_ingenieria_caracteristicas(pixels)
-                
-                status_text.text("Escalando datos...")
-                progress_bar.progress(70)
-                
-                pixels_scaled = self.scaler_actual.transform(pixels_enhanced)
-                
-                status_text.text("Realizando descomposición por color...")
-                progress_bar.progress(80)
-                
-                cmykrg_predictions = self.modelo_actual.predict(pixels_scaled)
-                cmykrg_predictions = np.clip(cmykrg_predictions, 0, 100)
-                
-                status_text.text("Calculando consumo...")
-                progress_bar.progress(90)
-                
-                resultados = self.calcular_consumo_fisico_original(
-                    cmykrg_predictions, 
-                    img_optimized.shape, 
-                    resolucion_y,
-                    "temp_image.jpg"
-                )
-                
-                progress_bar.progress(100)
-                status_text.text("Completado!")
-                
-                # Limpiar archivo temporal
-                try:
-                    os.remove("temp_image.jpg")
-                except:
-                    pass
-                
-                return resultados
-                
+            # ✅ Cargar imagen DIRECTAMENTE desde memoria
+            image = Image.open(uploaded_file)
+            
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+            
+            status_text.text("Optimizando imagen...")
+            progress_bar.progress(30)
+            
+            img_array = np.array(image)
+            img_optimized, was_optimized = self.optimizar_imagen(img_array)
+            
+            if was_optimized:
+                st.warning("⚠️ Imagen optimizada por tamaño")
+            
+            status_text.text("Preparando datos...")
+            progress_bar.progress(50)
+            
+            pixels = img_optimized.reshape(-1, 3)
+            
+            status_text.text("Aplicando ingeniería de características...")
+            progress_bar.progress(60)
+            
+            pixels_enhanced = self.aplicar_ingenieria_caracteristicas(pixels)
+            
+            status_text.text("Escalando datos...")
+            progress_bar.progress(70)
+            
+            pixels_scaled = self.scaler_actual.transform(pixels_enhanced)
+            
+            status_text.text("Realizando descomposición por color...")
+            progress_bar.progress(80)
+            
+            cmykrg_predictions = self.modelo_actual.predict(pixels_scaled)
+            cmykrg_predictions = np.clip(cmykrg_predictions, 0, 100)
+            
+            status_text.text("Calculando consumo...")
+            progress_bar.progress(90)
+            
+            # ✅ Pasar el objeto image en lugar de file path
+            resultados = self.calcular_consumo_fisico_original(
+                cmykrg_predictions, 
+                img_optimized.shape, 
+                resolucion_y,
+                image,  # ✅ Pasamos el objeto Image, no file path
+                uploaded_file.name  # ✅ Pasamos el nombre del archivo
+            )
+            
+            progress_bar.progress(100)
+            status_text.text("Completado!")
+            
+            # ✅ Agregar al historial (éxito)
+            self.agregar_log_procesamiento(uploaded_file, resolucion_y, resultados, exito=True)
+            
+            return resultados
+        
         except Exception as e:
+            # ✅ Agregar al historial (error)
+            self.agregar_log_procesamiento(uploaded_file, resolucion_y, None, exito=False, error_msg=str(e))
             st.error(f"❌ Error en procesamiento: {str(e)}")
-            # Limpiar archivo temporal en caso de error
-            try:
-                os.remove("temp_image.jpg")
-            except:
-                pass
             return None
 
     def cargar_modelo_manual(self, resolucion, uploaded_model):
         """Cargar un modelo manualmente - SOLO TÉCNICOS"""
         try:
-            # Guardar archivo temporalmente
+            # ⚠️ AQUÍ SÍ necesitamos archivo temporal para joblib
+            # Pero lo eliminamos inmediatamente después
             with open("temp_model.pkl", "wb") as f:
                 f.write(uploaded_model.getbuffer())
             
@@ -530,11 +616,12 @@ class CMYKRGConverterSimple:
                 self.scaler_1200 = model_data['scaler']
                 st.success(f"✅ Modelo 1200 DPI cargado: {filename}")
             
-            # Limpiar archivo temporal
+            # ✅ Limpiar archivo temporal inmediatamente
             os.remove("temp_model.pkl")
             
         except Exception as e:
             st.error(f"❌ No se pudo cargar el modelo: {str(e)}")
+            # ✅ Limpiar archivo temporal en caso de error
             try:
                 os.remove("temp_model.pkl")
             except:
@@ -563,7 +650,7 @@ class CMYKRGConverterSimple:
         
         with col_user:
             st.write(f"**Usuario:** {st.session_state.usuario_actual}")
-            if st.button("🚪 Cerrar Sesión"):
+            if st.button("🚪 Cerrar Sesión", use_container_width=True):  # ✅ CORREGIDO
                 for key in list(st.session_state.keys()):
                     del st.session_state[key]
                 st.rerun()
@@ -571,13 +658,16 @@ class CMYKRGConverterSimple:
         st.markdown("---")
         
         # Pestañas principales
-        tab1, tab2 = st.tabs(["⚙️ Configuración y Cálculo", "📊 Resultados"])
+        tab1, tab2, tab3 = st.tabs(["⚙️ Configuración y Cálculo", "📊 Resultados", "📋 Historial"])
         
         with tab1:
             self.mostrar_configuracion()
         
         with tab2:
             self.mostrar_resultados()
+            
+        with tab3:
+            self.mostrar_historial_procesamientos()
     
     def mostrar_configuracion(self):
         """Pestaña de configuración"""
@@ -615,7 +705,8 @@ class CMYKRGConverterSimple:
                 col_img, col_info = st.columns([1, 2])
                 
                 with col_img:
-                    st.image(image, caption="Vista previa", use_column_width=True)
+                    # ✅ CORREGIDO - use_container_width en lugar de use_column_width
+                    st.image(image, caption="Vista previa", use_container_width=True)
                 
                 with col_info:
                     st.subheader("📊 Información de la Imagen")
@@ -630,7 +721,8 @@ class CMYKRGConverterSimple:
                     
                     info_data = {
                         "Archivo": filename,
-                        "Tamaño": f"{width} × {height} píxeles",
+                        "Tamaño archivo": f"{uploaded_file.size:,} bytes",
+                        "Tamaño imagen": f"{width} × {height} píxeles",
                         "Píxeles totales": f"{total_pixels:,}",
                         "DPI detectado": f"{dpi_real:.0f}",
                         "Dimensiones físicas": f"{ancho_cm:.1f} × {alto_cm:.1f} cm",
@@ -647,7 +739,7 @@ class CMYKRGConverterSimple:
                 with col_btn1:
                     if st.button("🎯 CALCULAR CONSUMO DE TINTA", 
                                type="primary", 
-                               use_container_width=True,
+                               use_container_width=True,  # ✅ CORREGIDO
                                disabled=(self.modelo_actual is None)):
                         
                         if self.modelo_actual is None:
@@ -656,7 +748,10 @@ class CMYKRGConverterSimple:
                             with st.spinner("Procesando imagen..."):
                                 resultados = self.procesar_imagen_completo(uploaded_file, resolucion)
                                 st.session_state.ultimos_resultados = resultados
-                                st.success("✅ Cálculo completado! Ve a la pestaña 'Resultados'")
+                                if resultados:
+                                    st.success(f"✅ {uploaded_file.name} procesado correctamente! Ve a la pestaña 'Resultados'")
+                                else:
+                                    st.error(f"❌ Error procesando {uploaded_file.name}")
                         
             except Exception as e:
                 st.error(f"❌ Error procesando imagen: {e}")
@@ -669,7 +764,7 @@ class CMYKRGConverterSimple:
             col_tec1, col_tec2, col_tec3 = st.columns(3)
             
             with col_tec1:
-                if st.button("🔄 Recargar Modelos Automáticamente", use_container_width=True):
+                if st.button("🔄 Recargar Modelos Automáticamente", use_container_width=True):  # ✅ CORREGIDO
                     self.cargar_modelos()
                     st.rerun()
             
@@ -677,16 +772,17 @@ class CMYKRGConverterSimple:
                 st.write("**Cargar Modelo Manual:**")
                 modelo_file = st.file_uploader("Subir modelo .pkl", type=['pkl'], key="model_upload")
                 modelo_res = st.selectbox("Para resolución:", ["600", "1200"])
-                if modelo_file and st.button("📥 Cargar Modelo", use_container_width=True):
+                if modelo_file and st.button("📥 Cargar Modelo", use_container_width=True):  # ✅ CORREGIDO
                     self.cargar_modelo_manual(modelo_res, modelo_file)
                     st.rerun()
             
             with col_tec3:
-                if st.button("📊 Ver Info del Sistema", use_container_width=True):
+                if st.button("📊 Ver Info del Sistema", use_container_width=True):  # ✅ CORREGIDO
                     st.write(f"**Directorio:** {self.script_dir}")
                     st.write(f"**Modelo 600 cargado:** {self.modelo_600 is not None}")
                     st.write(f"**Modelo 1200 cargado:** {self.modelo_1200 is not None}")
                     st.write(f"**Modelo actual:** {self.modelo_actual is not None}")
+                    st.write(f"**Archivos en sesión:** {len(st.session_state.historial_procesamientos)}")
     
     def mostrar_resultados(self):
         """Mostrar resultados del cálculo"""
@@ -729,6 +825,9 @@ class CMYKRGConverterSimple:
                 f"{resultados['area_m2']:.4f} m²"
             )
         
+        # Información del archivo procesado
+        st.info(f"📁 **Archivo procesado:** {resultados.get('archivo_procesado', 'N/A')}")
+        
         # Información detallada
         with st.expander("📋 Detalles del Análisis", expanded=True):
             col_det1, col_det2 = st.columns(2)
@@ -764,7 +863,7 @@ class CMYKRGConverterSimple:
                 })
             
             df_tintas = pd.DataFrame(tintas_data)
-            st.dataframe(df_tintas, use_container_width=True)
+            st.dataframe(df_tintas, use_container_width=True)  # ✅ CORREGIDO
             
             # Gráfico de consumos
             st.subheader("📈 Distribución de Consumo por Tinta")
