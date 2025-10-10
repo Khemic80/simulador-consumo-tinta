@@ -14,10 +14,10 @@ import datetime
 # CONFIGURACIÓN GLOBAL
 # =============================================================================
 
-Image.MAX_IMAGE_PIXELS = 1000000000  # 1 billón de píxeles
+Image.MAX_IMAGE_PIXELS = 500000000  # 500 millones (más conservador)
 
 # Configuración fija
-max_pixels = 2000000
+max_pixels = 1000000  # 1 millón en lugar de 2 millones
 resolucion_x = 600  # Fijo
 densidad_tinta = 1.05  # g/ml
 
@@ -132,7 +132,7 @@ def mostrar_login():
     st.info("💡 **Nota:** Esta aplicación es de acceso restringido. Contacta al administrador para obtener credenciales.")
 
 # =============================================================================
-# CLASE PRINCIPAL - VERSIÓN SIMPLIFICADA PARA USUARIOS
+# CLASE PRINCIPAL - VERSIÓN OPTIMIZADA PARA MEMORIA
 # =============================================================================
 
 class CMYKRGConverterSimple:
@@ -291,63 +291,86 @@ class CMYKRGConverterSimple:
             return 300
     
     def optimizar_imagen(self, img_array):
-        """Optimizar imagen a 2,000,000 píxeles máximo (resize)"""
-        height, width = img_array.shape[:2]
-        total_pixels = height * width
-        
-        if total_pixels <= max_pixels:
+        """Optimizar imagen a 1,000,000 píxeles máximo (resize) - VERSIÓN CONSERVADORA"""
+        try:
+            height, width = img_array.shape[:2]
+            total_pixels = height * width
+            
+            if total_pixels <= max_pixels:
+                return img_array, False
+            
+            # Reducción más agresiva para imágenes grandes
+            if total_pixels > 5000000:  # > 5MP
+                target_pixels = 500000  # 500K máximo
+            else:
+                target_pixels = max_pixels
+                
+            scale_factor = (target_pixels / total_pixels) ** 0.5
+            new_width = max(100, int(width * scale_factor))  # Mínimo 100px
+            new_height = max(100, int(height * scale_factor))
+            
+            img_pil = Image.fromarray(img_array)
+            img_resized = img_pil.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            
+            if st.session_state.tipo_usuario == "tecnico":
+                st.warning(f"🔧 Imagen reducida: {width}x{height} → {new_width}x{new_height}")
+            
+            return np.array(img_resized), True
+            
+        except Exception as e:
+            st.error(f"❌ Error en optimización: {e}")
             return img_array, False
-        
-        scale_factor = (max_pixels / total_pixels) ** 0.5
-        new_width = int(width * scale_factor)
-        new_height = int(height * scale_factor)
-        
-        img_pil = Image.fromarray(img_array)
-        img_resized = img_pil.resize((new_width, new_height), Image.Resampling.LANCZOS)
-        return np.array(img_resized), True
     
     def aplicar_ingenieria_caracteristicas(self, X):
-        """EXACTAMENTE LA MISMA ingeniería de características que en la versión original"""
-        if len(X.shape) == 1:
-            X = X.reshape(1, -1)
+        """Ingeniería de características optimizada para memoria"""
+        try:
+            if len(X.shape) == 1:
+                X = X.reshape(1, -1)
+            
+            # Usar float32 en lugar de float64 para ahorrar memoria
+            X = np.clip(X, 0, 255).astype(np.float32)
+            
+            intensity = X.mean(axis=1).reshape(-1, 1)
+            saturation = (X.max(axis=1) - X.min(axis=1)).reshape(-1, 1)
+            
+            sum_rgb = X.sum(axis=1) + 1e-8
+            dominance_r = (X[:, 0] / sum_rgb).reshape(-1, 1)
+            dominance_g = (X[:, 1] / sum_rgb).reshape(-1, 1)
+            dominance_b = (X[:, 2] / sum_rgb).reshape(-1, 1)
+            
+            red_channel = X[:, 0].reshape(-1, 1)
+            green_channel = X[:, 1].reshape(-1, 1)
+            blue_channel = X[:, 2].reshape(-1, 1)
+            
+            luminance = (0.299 * red_channel + 0.587 * green_channel + 0.114 * blue_channel).reshape(-1, 1)
+            
+            rg_diff = (red_channel - green_channel).reshape(-1, 1)
+            rb_diff = (red_channel - blue_channel).reshape(-1, 1)
+            gb_diff = (green_channel - blue_channel).reshape(-1, 1)
+            
+            X_enhanced = np.hstack([
+                X, intensity, saturation, luminance,
+                dominance_r, dominance_g, dominance_b,
+                rg_diff, rb_diff, gb_diff,
+                red_channel**2, green_channel**2, blue_channel**2,
+                np.sqrt(np.maximum(red_channel, 0)),
+                np.sqrt(np.maximum(green_channel, 0)),
+                np.sqrt(np.maximum(blue_channel, 0)),
+                red_channel * green_channel,
+                red_channel * blue_channel,
+                green_channel * blue_channel
+            ])
+            
+            X_enhanced = np.nan_to_num(X_enhanced, nan=0.0, posinf=0.0, neginf=0.0)
+            
+            if st.session_state.tipo_usuario == "tecnico":
+                st.info(f"🔧 Ingeniería de características: {X.shape[1]} → {X_enhanced.shape[1]} características")
+            
+            return X_enhanced.astype(np.float32)
         
-        intensity = X.mean(axis=1).reshape(-1, 1)
-        saturation = (X.max(axis=1) - X.min(axis=1)).reshape(-1, 1)
-        
-        sum_rgb = X.sum(axis=1) + 1e-8
-        dominance_r = (X[:, 0] / sum_rgb).reshape(-1, 1)
-        dominance_g = (X[:, 1] / sum_rgb).reshape(-1, 1)
-        dominance_b = (X[:, 2] / sum_rgb).reshape(-1, 1)
-        
-        red_channel = X[:, 0].reshape(-1, 1)
-        green_channel = X[:, 1].reshape(-1, 1)
-        blue_channel = X[:, 2].reshape(-1, 1)
-        
-        luminance = (0.299 * red_channel + 0.587 * green_channel + 0.114 * blue_channel).reshape(-1, 1)
-        
-        rg_diff = (red_channel - green_channel).reshape(-1, 1)
-        rb_diff = (red_channel - blue_channel).reshape(-1, 1)
-        gb_diff = (green_channel - blue_channel).reshape(-1, 1)
-        
-        X_enhanced = np.hstack([
-            X, intensity, saturation, luminance,
-            dominance_r, dominance_g, dominance_b,
-            rg_diff, rb_diff, gb_diff,
-            red_channel**2, green_channel**2, blue_channel**2,
-            np.sqrt(np.maximum(red_channel, 0)),
-            np.sqrt(np.maximum(green_channel, 0)),
-            np.sqrt(np.maximum(blue_channel, 0)),
-            red_channel * green_channel,
-            red_channel * blue_channel,
-            green_channel * blue_channel
-        ])
-        
-        X_enhanced = np.nan_to_num(X_enhanced, nan=0.0, posinf=0.0, neginf=0.0)
-        
-        if st.session_state.tipo_usuario == "tecnico":
-            st.info(f"🔧 Ingeniería de características: {X.shape[1]} → {X_enhanced.shape[1]} características")
-        
-        return X_enhanced
+        except Exception as e:
+            st.error(f"❌ Error en ingeniería de características: {e}")
+            return X.astype(np.float32)
     
     def agregar_log_procesamiento(self, uploaded_file, resolucion, resultados, exito=True, error_msg=None):
         """Agregar entrada al historial de procesamientos"""
@@ -518,8 +541,8 @@ class CMYKRGConverterSimple:
             traceback.print_exc()
             return None
 
-    def procesar_imagen_completo(self, uploaded_file, resolucion_y):
-        """Procesamiento COMPLETO en memoria"""
+    def procesar_imagen_por_lotes(self, uploaded_file, resolucion_y, batch_size=5000):
+        """Procesamiento por LOTES para evitar problemas de memoria"""
         try:
             progress_bar = st.progress(0)
             status_text = st.empty()
@@ -541,30 +564,55 @@ class CMYKRGConverterSimple:
             if was_optimized and st.session_state.tipo_usuario == "tecnico":
                 st.warning("⚠️ Imagen optimizada por tamaño")
             
-            status_text.text("Preparando datos...")
-            progress_bar.progress(50)
+            status_text.text("Preparando procesamiento por lotes...")
+            progress_bar.progress(40)
             
-            pixels = img_optimized.reshape(-1, 3)
+            # Obtener dimensiones
+            height, width = img_optimized.shape[:2]
+            total_pixels = height * width
             
-            status_text.text("Aplicando perfil de color...")
-            progress_bar.progress(60)
+            # Procesar por lotes
+            batch_predictions = []
+            num_batches = (total_pixels + batch_size - 1) // batch_size
             
-            pixels_enhanced = self.aplicar_ingenieria_caracteristicas(pixels)
+            if st.session_state.tipo_usuario == "tecnico":
+                st.info(f"🔧 Procesando {total_pixels:,} píxeles en {num_batches} lotes de {batch_size}")
             
-            status_text.text("Escalando datos...")
-            progress_bar.progress(70)
+            for batch_idx in range(num_batches):
+                start_idx = batch_idx * batch_size
+                end_idx = min((batch_idx + 1) * batch_size, total_pixels)
+                
+                # Progreso
+                progress = 40 + (batch_idx / num_batches) * 50
+                status_text.text(f"Procesando lote {batch_idx + 1}/{num_batches}...")
+                progress_bar.progress(int(progress))
+                
+                # Extraer lote actual
+                batch_pixels = img_optimized.reshape(-1, 3)[start_idx:end_idx]
+                
+                # Aplicar ingeniería de características al lote
+                batch_enhanced = self.aplicar_ingenieria_caracteristicas(batch_pixels)
+                
+                # Escalar y predecir
+                batch_scaled = self.scaler_actual.transform(batch_enhanced)
+                batch_pred = self.modelo_actual.predict(batch_scaled)
+                
+                batch_predictions.append(batch_pred)
+                
+                # Liberar memoria
+                del batch_pixels, batch_enhanced, batch_scaled
+                if batch_idx % 10 == 0:  # Cada 10 lotes
+                    import gc
+                    gc.collect()
             
-            pixels_scaled = self.scaler_actual.transform(pixels_enhanced)
+            # Combinar todas las predicciones
+            status_text.text("Combinando resultados...")
+            progress_bar.progress(95)
             
-            status_text.text("Realizando descomposición...")
-            progress_bar.progress(80)
-            
-            cmykrg_predictions = self.modelo_actual.predict(pixels_scaled)
+            cmykrg_predictions = np.vstack(batch_predictions)
             cmykrg_predictions = np.clip(cmykrg_predictions, 0, 100)
             
-            status_text.text("Calculando consumo...")
-            progress_bar.progress(90)
-            
+            # Calcular consumo
             resultados = self.calcular_consumo_fisico_original(
                 cmykrg_predictions, 
                 img_optimized.shape, 
@@ -578,12 +626,46 @@ class CMYKRGConverterSimple:
             
             self.agregar_log_procesamiento(uploaded_file, resolucion_y, resultados, exito=True)
             
+            # Limpiar memoria
+            del img_array, img_optimized, batch_predictions, cmykrg_predictions
+            import gc
+            gc.collect()
+            
             return resultados
         
         except Exception as e:
-            self.agregar_log_procesamiento(uploaded_file, resolucion_y, None, exito=False, error_msg=str(e))
-            st.error(f"❌ Error en procesamiento: {str(e)}")
+            error_msg = f"Error en procesamiento por lotes: {str(e)}"
+            st.error(f"❌ {error_msg}")
+            
+            if st.session_state.tipo_usuario == "tecnico":
+                import traceback
+                st.error(f"🔧 Detalles: {traceback.format_exc()}")
+                
+            self.agregar_log_procesamiento(uploaded_file, resolucion_y, None, exito=False, error_msg=error_msg)
             return None
+
+    def monitor_memoria(self):
+        """Monitor simple de uso de memoria"""
+        if st.session_state.tipo_usuario != "tecnico":
+            return
+            
+        try:
+            import psutil
+            import os
+            process = psutil.Process(os.getpid())
+            memory_info = process.memory_info()
+            memory_mb = memory_info.rss / 1024 / 1024
+            
+            st.sidebar.info(f"🧠 Memoria usada: {memory_mb:.1f} MB")
+            
+            if memory_mb > 512:  # Streamlit Cloud límite ~1GB
+                st.sidebar.warning("⚠️ Alto uso de memoria")
+            elif memory_mb > 800:
+                st.sidebar.error("🚨 Uso de memoria crítico")
+                
+        except Exception as e:
+            # Si psutil no está disponible, mostrar mensaje simple
+            st.sidebar.info("📊 Monitor memoria: No disponible")
 
     def cargar_modelo_manual(self, resolucion, uploaded_model):
         """Cargar un modelo manualmente - SOLO TÉCNICOS"""
@@ -613,7 +695,7 @@ class CMYKRGConverterSimple:
                 pass
 
 # =============================================================================
-# INTERFAZ STREAMLIT - VERSIÓN SIMPLIFICADA
+# INTERFAZ STREAMLIT - VERSIÓN OPTIMIZADA
 # =============================================================================
 
     def mostrar_interfaz_principal(self):
@@ -642,6 +724,10 @@ class CMYKRGConverterSimple:
         
         st.markdown("---")
         
+        # Monitor de memoria para técnicos
+        if st.session_state.tipo_usuario == "tecnico":
+            self.monitor_memoria()
+        
         # Pestañas diferentes según tipo de usuario
         if st.session_state.tipo_usuario == "tecnico":
             tab1, tab2, tab3 = st.tabs(["⚙️ Configuración y Cálculo", "📊 Resultados", "📋 Historial"])
@@ -659,7 +745,7 @@ class CMYKRGConverterSimple:
                 self.mostrar_historial_procesamientos()
     
     def mostrar_configuracion(self):
-        """Pestaña de configuración - VERSIÓN SIMPLIFICADA PARA USUARIOS"""
+        """Pestaña de configuración - VERSIÓN OPTIMIZADA"""
         
         if st.session_state.tipo_usuario == "tecnico":
             st.header("Configuración del Análisis")
@@ -757,8 +843,9 @@ class CMYKRGConverterSimple:
                         if self.modelo_actual is None:
                             st.error("❌ No hay modelo cargado para la resolución seleccionada")
                         else:
-                            with st.spinner("Procesando imagen..."):
-                                resultados = self.procesar_imagen_completo(uploaded_file, resolucion)
+                            with st.spinner("Procesando imagen (modo optimizado)..."):
+                                # USAR LA NUEVA VERSIÓN POR LOTES
+                                resultados = self.procesar_imagen_por_lotes(uploaded_file, resolucion, batch_size=5000)
                                 st.session_state.ultimos_resultados = resultados
                                 if resultados:
                                     st.success(f"✅ {uploaded_file.name} procesado correctamente! Ve a la pestaña 'Resultados'")
