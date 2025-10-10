@@ -14,10 +14,9 @@ import datetime
 # CONFIGURACIÓN GLOBAL
 # =============================================================================
 
-# En lugar de None, poner un límite muy alto pero razonable
 Image.MAX_IMAGE_PIXELS = 1000000000  # 1 billón de píxeles
 
-# Configuración fija (de tu código)
+# Configuración fija
 max_pixels = 2000000
 resolucion_x = 600  # Fijo
 densidad_tinta = 1.05  # g/ml
@@ -66,14 +65,12 @@ def mostrar_login():
     st.title("🔐 Simulador de Consumo de Tinta")
     st.markdown("---")
     
-    # Verificar si hay usuarios configurados
     if not verificar_usuarios_configurados():
         st.error("⚠️ Sistema no configurado. Contacta al administrador.")
         return
     
     usuarios_permitidos = st.secrets.get("usuarios", {})
     
-    # Separar usuarios por rol
     usuarios_normales = [user for user, data in usuarios_permitidos.items() 
                         if data.get("rol") == "usuario"]
     usuarios_tecnicos = [user for user, data in usuarios_permitidos.items() 
@@ -98,7 +95,6 @@ def mostrar_login():
                         st.session_state.autenticado = True
                         st.session_state.usuario_actual = usuario_user
                         st.session_state.tipo_usuario = "usuario"
-                        # Inicializar estadísticas
                         if not st.session_state.estadisticas_uso['primero_uso']:
                             st.session_state.estadisticas_uso['primero_uso'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         st.rerun()
@@ -124,7 +120,6 @@ def mostrar_login():
                         st.session_state.autenticado = True
                         st.session_state.usuario_actual = tecnico_user
                         st.session_state.tipo_usuario = "tecnico"
-                        # Inicializar estadísticas
                         if not st.session_state.estadisticas_uso['primero_uso']:
                             st.session_state.estadisticas_uso['primero_uso'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         st.rerun()
@@ -137,7 +132,7 @@ def mostrar_login():
     st.info("💡 **Nota:** Esta aplicación es de acceso restringido. Contacta al administrador para obtener credenciales.")
 
 # =============================================================================
-# CLASE PRINCIPAL - VERSIÓN MEMORIA + LOGGING
+# CLASE PRINCIPAL - VERSIÓN SIMPLIFICADA PARA USUARIOS
 # =============================================================================
 
 class CMYKRGConverterSimple:
@@ -149,101 +144,110 @@ class CMYKRGConverterSimple:
         self.modelo_actual = None
         self.scaler_actual = None
         
-        # Obtener la carpeta donde está este script
         if getattr(sys, 'frozen', False):
             self.script_dir = os.path.dirname(sys.executable)
         else:
             self.script_dir = os.path.dirname(os.path.abspath(__file__))
         
-        st.info(f"📂 Carpeta del script: {self.script_dir}")
-        st.info(f"🔐 Modo: {st.session_state.tipo_usuario.upper()}")
+        # Solo mostrar info técnica para técnicos
+        if st.session_state.tipo_usuario == "tecnico":
+            st.info(f"📂 Carpeta del script: {self.script_dir}")
+            st.info(f"🔐 Modo: {st.session_state.tipo_usuario.upper()}")
         
-        # Cargar modelos al iniciar
         self.cargar_modelos()
     
     def cargar_modelos(self):
         """Cargar modelos específicos para 600 y 1200 DPI"""
         try:
-            st.info("🔍 BUSCANDO MODELOS ESPECÍFICOS POR RESOLUCIÓN...")
+            if st.session_state.tipo_usuario == "tecnico":
+                st.info("🔍 BUSCANDO MODELOS ESPECÍFICOS POR RESOLUCIÓN...")
             
-            # Buscar todos los archivos .pkl en la carpeta del script
             pkl_files = glob.glob(os.path.join(self.script_dir, "*.pkl"))
             
             if not pkl_files:
                 st.error("❌ NO se encontraron archivos .pkl en la carpeta del script")
                 return
             
-            st.success(f"🎯 Archivos .pkl encontrados: {[os.path.basename(f) for f in pkl_files]}")
+            if st.session_state.tipo_usuario == "tecnico":
+                st.success(f"🎯 Archivos .pkl encontrados: {[os.path.basename(f) for f in pkl_files]}")
             
-            # Buscar modelos específicos
             modelo_600_path = None
             modelo_1200_path = None
             
             for file_path in pkl_files:
                 filename = os.path.basename(file_path).lower()
                 
-                # Buscar modelo 600 DPI
                 if '600' in filename and '1200' not in filename:
                     modelo_600_path = file_path
-                    st.success(f"✅ Encontrado modelo 600 DPI: {os.path.basename(file_path)}")
+                    if st.session_state.tipo_usuario == "tecnico":
+                        st.success(f"✅ Encontrado modelo 600 DPI: {os.path.basename(file_path)}")
                 
-                # Buscar modelo 1200 DPI  
                 elif '1200' in filename and '600' not in filename:
                     modelo_1200_path = file_path
-                    st.success(f"✅ Encontrado modelo 1200 DPI: {os.path.basename(file_path)}")
+                    if st.session_state.tipo_usuario == "tecnico":
+                        st.success(f"✅ Encontrado modelo 1200 DPI: {os.path.basename(file_path)}")
                 
-                # Si el nombre es genérico, intentar deducir por el nombre
                 elif 'modelo' in filename:
                     if '600' in filename:
                         modelo_600_path = file_path
-                        st.success(f"✅ Asignado como modelo 600 DPI: {os.path.basename(file_path)}")
+                        if st.session_state.tipo_usuario == "tecnico":
+                            st.success(f"✅ Asignado como modelo 600 DPI: {os.path.basename(file_path)}")
                     elif '1200' in filename:
                         modelo_1200_path = file_path
-                        st.success(f"✅ Asignado como modelo 1200 DPI: {os.path.basename(file_path)}")
+                        if st.session_state.tipo_usuario == "tecnico":
+                            st.success(f"✅ Asignado como modelo 1200 DPI: {os.path.basename(file_path)}")
             
-            # Cargar modelo 600 DPI
             if modelo_600_path:
                 try:
                     model_data = joblib.load(modelo_600_path)
                     self.modelo_600 = model_data['model']
                     self.scaler_600 = model_data['scaler']
-                    st.success(f"✅ Modelo 600 DPI cargado exitosamente")
+                    if st.session_state.tipo_usuario == "tecnico":
+                        st.success(f"✅ Modelo 600 DPI cargado exitosamente")
                 except Exception as e:
-                    st.error(f"❌ Error cargando modelo 600 DPI: {e}")
+                    if st.session_state.tipo_usuario == "tecnico":
+                        st.error(f"❌ Error cargando modelo 600 DPI: {e}")
             else:
-                st.warning("❌ Modelo 600 DPI no encontrado")
+                if st.session_state.tipo_usuario == "tecnico":
+                    st.warning("❌ Modelo 600 DPI no encontrado")
             
-            # Cargar modelo 1200 DPI
             if modelo_1200_path:
                 try:
                     model_data = joblib.load(modelo_1200_path)
                     self.modelo_1200 = model_data['model']
                     self.scaler_1200 = model_data['scaler']
-                    st.success(f"✅ Modelo 1200 DPI cargado exitosamente")
+                    if st.session_state.tipo_usuario == "tecnico":
+                        st.success(f"✅ Modelo 1200 DPI cargado exitosamente")
                 except Exception as e:
-                    st.error(f"❌ Error cargando modelo 1200 DPI: {e}")
+                    if st.session_state.tipo_usuario == "tecnico":
+                        st.error(f"❌ Error cargando modelo 1200 DPI: {e}")
             else:
-                st.warning("❌ Modelo 1200 DPI no encontrado")
+                if st.session_state.tipo_usuario == "tecnico":
+                    st.warning("❌ Modelo 1200 DPI no encontrado")
             
-            # Si solo hay un modelo y no se pudo determinar, cargarlo como universal
             if len(pkl_files) == 1 and (not self.modelo_600 or not self.modelo_1200):
                 universal_model = pkl_files[0]
-                st.info(f"🔄 Cargando modelo universal: {os.path.basename(universal_model)}")
+                if st.session_state.tipo_usuario == "tecnico":
+                    st.info(f"🔄 Cargando modelo universal: {os.path.basename(universal_model)}")
                 try:
                     model_data = joblib.load(universal_model)
                     if not self.modelo_600:
                         self.modelo_600 = model_data['model']
                         self.scaler_600 = model_data['scaler']
-                        st.success("✅ Modelo universal asignado a 600 DPI")
+                        if st.session_state.tipo_usuario == "tecnico":
+                            st.success("✅ Modelo universal asignado a 600 DPI")
                     if not self.modelo_1200:
                         self.modelo_1200 = model_data['model']
                         self.scaler_1200 = model_data['scaler']
-                        st.success("✅ Modelo universal asignado a 1200 DPI")
+                        if st.session_state.tipo_usuario == "tecnico":
+                            st.success("✅ Modelo universal asignado a 1200 DPI")
                 except Exception as e:
-                    st.error(f"❌ Error cargando modelo universal: {e}")
+                    if st.session_state.tipo_usuario == "tecnico":
+                        st.error(f"❌ Error cargando modelo universal: {e}")
                 
         except Exception as e:
-            st.error(f"❌ Error general: {e}")
+            if st.session_state.tipo_usuario == "tecnico":
+                st.error(f"❌ Error general: {e}")
     
     def actualizar_estado_modelo(self):
         """Actualizar el estado del modelo en la interfaz"""
@@ -262,14 +266,17 @@ class CMYKRGConverterSimple:
         if resolucion == "600" and self.modelo_600 is not None:
             self.modelo_actual = self.modelo_600
             self.scaler_actual = self.scaler_600
-            st.success(f"🔧 Modelo 600 DPI activado")
+            if st.session_state.tipo_usuario == "tecnico":
+                st.success(f"🔧 Modelo 600 DPI activado")
         elif resolucion == "1200" and self.modelo_1200 is not None:
             self.modelo_actual = self.modelo_1200
             self.scaler_actual = self.scaler_1200
-            st.success(f"🔧 Modelo 1200 DPI activado")
+            if st.session_state.tipo_usuario == "tecnico":
+                st.success(f"🔧 Modelo 1200 DPI activado")
         else:
             self.modelo_actual = None
-            st.error(f"❌ No hay modelo disponible para {resolucion} DPI")
+            if st.session_state.tipo_usuario == "tecnico":
+                st.error(f"❌ No hay modelo disponible para {resolucion} DPI")
     
     def detectar_dpi_real(self, img):
         """Detectar DPI de metadatos"""
@@ -304,56 +311,41 @@ class CMYKRGConverterSimple:
         if len(X.shape) == 1:
             X = X.reshape(1, -1)
         
-        # Características básicas de color
         intensity = X.mean(axis=1).reshape(-1, 1)
         saturation = (X.max(axis=1) - X.min(axis=1)).reshape(-1, 1)
         
-        # Evitar división por cero en dominancia
         sum_rgb = X.sum(axis=1) + 1e-8
         dominance_r = (X[:, 0] / sum_rgb).reshape(-1, 1)
         dominance_g = (X[:, 1] / sum_rgb).reshape(-1, 1)
         dominance_b = (X[:, 2] / sum_rgb).reshape(-1, 1)
         
-        # Características adicionales
         red_channel = X[:, 0].reshape(-1, 1)
         green_channel = X[:, 1].reshape(-1, 1)
         blue_channel = X[:, 2].reshape(-1, 1)
         
-        # Luminosidad (fórmula estándar)
         luminance = (0.299 * red_channel + 0.587 * green_channel + 0.114 * blue_channel).reshape(-1, 1)
         
-        # Diferencia entre canales (en lugar de ratios problemáticos)
         rg_diff = (red_channel - green_channel).reshape(-1, 1)
         rb_diff = (red_channel - blue_channel).reshape(-1, 1)
         gb_diff = (green_channel - blue_channel).reshape(-1, 1)
         
-        # Combinar características (sin ratios problemáticos)
         X_enhanced = np.hstack([
-            X,                    # Características originales (3)
-            intensity,           # Intensidad (1)
-            saturation,          # Saturación (1)
-            luminance,           # Luminosidad (1)
-            dominance_r,         # Dominancia de rojo (1)
-            dominance_g,         # Dominancia de verde (1)
-            dominance_b,         # Dominancia de azul (1)
-            rg_diff,             # Diferencia R-G (1)
-            rb_diff,             # Diferencia R-B (1)  
-            gb_diff,             # Diferencia G-B (1)
-            red_channel**2,      # Términos cuadráticos (3)
-            green_channel**2,
-            blue_channel**2,
-            np.sqrt(np.maximum(red_channel, 0)),    # Raíces cuadradas (3)
+            X, intensity, saturation, luminance,
+            dominance_r, dominance_g, dominance_b,
+            rg_diff, rb_diff, gb_diff,
+            red_channel**2, green_channel**2, blue_channel**2,
+            np.sqrt(np.maximum(red_channel, 0)),
             np.sqrt(np.maximum(green_channel, 0)),
             np.sqrt(np.maximum(blue_channel, 0)),
-            red_channel * green_channel,  # Interacciones (3)
+            red_channel * green_channel,
             red_channel * blue_channel,
             green_channel * blue_channel
         ])
         
-        # Limpiar cualquier valor problemático
         X_enhanced = np.nan_to_num(X_enhanced, nan=0.0, posinf=0.0, neginf=0.0)
         
-        st.info(f"🔧 Ingeniería de características: {X.shape[1]} → {X_enhanced.shape[1]} características")
+        if st.session_state.tipo_usuario == "tecnico":
+            st.info(f"🔧 Ingeniería de características: {X.shape[1]} → {X_enhanced.shape[1]} características")
         
         return X_enhanced
     
@@ -375,10 +367,8 @@ class CMYKRGConverterSimple:
             'area_m2': resultados['area_m2'] if resultados and exito else None
         }
         
-        # Agregar al inicio para que los más recientes aparezcan primero
         st.session_state.historial_procesamientos.insert(0, log_entry)
         
-        # Actualizar estadísticas
         stats = st.session_state.estadisticas_uso
         stats['total_archivos'] += 1
         stats['ultimo_uso'] = timestamp
@@ -388,21 +378,23 @@ class CMYKRGConverterSimple:
         else:
             stats['archivos_fallidos'] += 1
         
-        # Mantener solo los últimos 50 registros para no sobrecargar memoria
         if len(st.session_state.historial_procesamientos) > 50:
             st.session_state.historial_procesamientos = st.session_state.historial_procesamientos[:50]
     
     def mostrar_historial_procesamientos(self):
-        """Mostrar historial de archivos procesados"""
+        """Mostrar historial de archivos procesados - SOLO TÉCNICOS"""
+        if st.session_state.tipo_usuario != "tecnico":
+            st.info("🔒 Esta función solo está disponible para usuarios técnicos")
+            return
+            
         if not st.session_state.historial_procesamientos:
             st.info("📝 Aún no se han procesado archivos en esta sesión")
             return
         
         st.subheader("📋 Historial de Procesamientos (Esta Sesión)")
         
-        # Crear DataFrame para mejor visualización
         historial_data = []
-        for log in st.session_state.historial_procesamientos[:20]:  # Mostrar últimos 20
+        for log in st.session_state.historial_procesamientos[:20]:
             historial_data.append({
                 'Fecha/Hora': log['timestamp'],
                 'Archivo': log['archivo_nombre'],
@@ -415,9 +407,8 @@ class CMYKRGConverterSimple:
         
         if historial_data:
             df_historial = pd.DataFrame(historial_data)
-            st.dataframe(df_historial, use_container_width=True)  # ✅ CORREGIDO
+            st.dataframe(df_historial, use_container_width=True)
         
-        # Mostrar estadísticas
         stats = st.session_state.estadisticas_uso
         col1, col2, col3, col4 = st.columns(4)
         
@@ -432,43 +423,45 @@ class CMYKRGConverterSimple:
             st.metric("Tasa de Éxito", f"{tasa_exito:.1f}%")
     
     def calcular_consumo_fisico_original(self, cmykrg_predictions, img_shape, resolucion_y, image, filename):
-        """Calcular consumo físico de tinta - VERSIÓN MEMORIA"""
+        """Calcular consumo físico de tinta - VERSIÓN SILENCIOSA PARA USUARIOS"""
         try:
-            st.info("🔍 Iniciando cálculo de consumo físico (MÉTODO v0.9)...")
+            if st.session_state.tipo_usuario == "tecnico":
+                st.info("🔍 Iniciando cálculo de consumo físico (MÉTODO v0.9)...")
             
-            densidad_tinta = 1.05  # g/ml
-            dpi_x = float(resolucion_x)  # 600 DPI fijo en X
+            densidad_tinta = 1.05
+            dpi_x = float(resolucion_x)
             dpi_y = float(resolucion_y)
             
-            # Obtener dimensiones reales de la imagen desde el objeto Image
             width_orig, height_orig = image.size
             dpi_real = self.detectar_dpi_real(image)
             
-            # Calcular dimensiones reales en cm (igual que v0.9)
             ancho_cm = (width_orig / dpi_real) * 2.54
             alto_cm = (height_orig / dpi_real) * 2.54
             area_m2 = (ancho_cm * alto_cm) / 10000.0
 
-            st.info(f"📐 Archivo: {filename}")
-            st.info(f"📏 Dimensiones: {width_orig} x {height_orig} píxeles")
-            st.info(f"📐 Dimensiones físicas: {ancho_cm:.1f} x {alto_cm:.1f} cm")
-            st.info(f"📊 Área: {area_m2:.6f} m²")
-            st.info(f"🎯 DPI real: {dpi_real}, DPI impresión: {dpi_x}x{dpi_y}")
+            if st.session_state.tipo_usuario == "tecnico":
+                st.info(f"📐 Archivo: {filename}")
+                st.info(f"📏 Dimensiones: {width_orig} x {height_orig} píxeles")
+                st.info(f"📐 Dimensiones físicas: {ancho_cm:.1f} x {alto_cm:.1f} cm")
+                st.info(f"📊 Área: {area_m2:.6f} m²")
+                st.info(f"🎯 DPI real: {dpi_real}, DPI impresión: {dpi_x}x{dpi_y}")
             
-            # FÓRMULA EXACTA v0.9 para puntos por m²
             puntos_por_m2 = (dpi_x / 2.54) * (dpi_y / 2.54) * 10000
-            st.info(f"🔢 Puntos por m²: {puntos_por_m2:,.0f}")
             
-            # Mismo volumen por punto que v0.9
+            if st.session_state.tipo_usuario == "tecnico":
+                st.info(f"🔢 Puntos por m²: {puntos_por_m2:,.0f}")
+            
             vol_por_punto_ml = 15e-9
             vol_max_ml_m2 = puntos_por_m2 * vol_por_punto_ml
-            st.info(f"💧 Volumen máximo por m²: {vol_max_ml_m2:.6f} ml")
             
-            # Mismo cálculo de coberturas que v0.9
+            if st.session_state.tipo_usuario == "tecnico":
+                st.info(f"💧 Volumen máximo por m²: {vol_max_ml_m2:.6f} ml")
+            
             coberturas = np.mean(cmykrg_predictions / 100.0, axis=0)
-            st.info(f"🎨 Coberturas promedio: {coberturas}")
             
-            # Mismos factores de cabezal que v0.9
+            if st.session_state.tipo_usuario == "tecnico":
+                st.info(f"🎨 Coberturas promedio: {coberturas}")
+            
             factores_cabezal = {
                 'Cian': 2.0, 'Magenta': 2.0, 'Amarillo': 2.0,
                 'Negro': 2.0, 'Rojo': 1.0, 'Verde': 1.0
@@ -478,12 +471,10 @@ class CMYKRGConverterSimple:
             consumo_total_g_m2 = 0
             consumos_detallados = {}
             
-            # MISMO CÁLCULO POR CANAL que v0.9
             for i, canal in enumerate(canales):
                 factor = factores_cabezal[canal]
                 cobertura = coberturas[i]
                 
-                # Fórmula idéntica a v0.9
                 vol_ml_m2 = cobertura * vol_max_ml_m2 * factor
                 masa_g_m2 = vol_ml_m2 * densidad_tinta
                 vol_ml_total = vol_ml_m2 * area_m2
@@ -500,12 +491,14 @@ class CMYKRGConverterSimple:
                     'factores_cabezal': factor
                 }
                 
-                st.info(f"  {canal}: {cobertura*100:.1f}% -> {masa_g_m2:.4f} g/m²")
+                if st.session_state.tipo_usuario == "tecnico":
+                    st.info(f"  {canal}: {cobertura*100:.1f}% -> {masa_g_m2:.4f} g/m²")
 
             consumo_total_ml = consumo_total_g_m2 * area_m2 / densidad_tinta
             consumo_total_g = consumo_total_g_m2 * area_m2
             
-            st.success(f"✅ Consumo TOTAL: {consumo_total_g_m2:.4f} g/m²")
+            if st.session_state.tipo_usuario == "tecnico":
+                st.success(f"✅ Consumo TOTAL: {consumo_total_g_m2:.4f} g/m²")
             
             return {
                 'total_g_m2': consumo_total_g_m2,
@@ -520,13 +513,13 @@ class CMYKRGConverterSimple:
             }
 
         except Exception as e:
-            st.error(f"❌ ERROR en calcular_consumo_fisico_original: {str(e)}")
+            st.error(f"❌ ERROR en cálculo: {str(e)}")
             import traceback
             traceback.print_exc()
             return None
 
     def procesar_imagen_completo(self, uploaded_file, resolucion_y):
-        """Procesamiento COMPLETO en memoria - SIN archivos temporales"""
+        """Procesamiento COMPLETO en memoria"""
         try:
             progress_bar = st.progress(0)
             status_text = st.empty()
@@ -534,7 +527,6 @@ class CMYKRGConverterSimple:
             status_text.text("Cargando imagen...")
             progress_bar.progress(10)
             
-            # ✅ Cargar imagen DIRECTAMENTE desde memoria
             image = Image.open(uploaded_file)
             
             if image.mode != 'RGB':
@@ -546,7 +538,7 @@ class CMYKRGConverterSimple:
             img_array = np.array(image)
             img_optimized, was_optimized = self.optimizar_imagen(img_array)
             
-            if was_optimized:
+            if was_optimized and st.session_state.tipo_usuario == "tecnico":
                 st.warning("⚠️ Imagen optimizada por tamaño")
             
             status_text.text("Preparando datos...")
@@ -554,7 +546,7 @@ class CMYKRGConverterSimple:
             
             pixels = img_optimized.reshape(-1, 3)
             
-            status_text.text("Aplicando ingeniería de características...")
+            status_text.text("Aplicando perfil de color...")
             progress_bar.progress(60)
             
             pixels_enhanced = self.aplicar_ingenieria_caracteristicas(pixels)
@@ -564,7 +556,7 @@ class CMYKRGConverterSimple:
             
             pixels_scaled = self.scaler_actual.transform(pixels_enhanced)
             
-            status_text.text("Realizando descomposición por color...")
+            status_text.text("Realizando descomposición...")
             progress_bar.progress(80)
             
             cmykrg_predictions = self.modelo_actual.predict(pixels_scaled)
@@ -573,25 +565,22 @@ class CMYKRGConverterSimple:
             status_text.text("Calculando consumo...")
             progress_bar.progress(90)
             
-            # ✅ Pasar el objeto image en lugar de file path
             resultados = self.calcular_consumo_fisico_original(
                 cmykrg_predictions, 
                 img_optimized.shape, 
                 resolucion_y,
-                image,  # ✅ Pasamos el objeto Image, no file path
-                uploaded_file.name  # ✅ Pasamos el nombre del archivo
+                image,
+                uploaded_file.name
             )
             
             progress_bar.progress(100)
             status_text.text("Completado!")
             
-            # ✅ Agregar al historial (éxito)
             self.agregar_log_procesamiento(uploaded_file, resolucion_y, resultados, exito=True)
             
             return resultados
         
         except Exception as e:
-            # ✅ Agregar al historial (error)
             self.agregar_log_procesamiento(uploaded_file, resolucion_y, None, exito=False, error_msg=str(e))
             st.error(f"❌ Error en procesamiento: {str(e)}")
             return None
@@ -599,8 +588,6 @@ class CMYKRGConverterSimple:
     def cargar_modelo_manual(self, resolucion, uploaded_model):
         """Cargar un modelo manualmente - SOLO TÉCNICOS"""
         try:
-            # ⚠️ AQUÍ SÍ necesitamos archivo temporal para joblib
-            # Pero lo eliminamos inmediatamente después
             with open("temp_model.pkl", "wb") as f:
                 f.write(uploaded_model.getbuffer())
             
@@ -616,19 +603,17 @@ class CMYKRGConverterSimple:
                 self.scaler_1200 = model_data['scaler']
                 st.success(f"✅ Modelo 1200 DPI cargado: {filename}")
             
-            # ✅ Limpiar archivo temporal inmediatamente
             os.remove("temp_model.pkl")
             
         except Exception as e:
             st.error(f"❌ No se pudo cargar el modelo: {str(e)}")
-            # ✅ Limpiar archivo temporal en caso de error
             try:
                 os.remove("temp_model.pkl")
             except:
                 pass
 
 # =============================================================================
-# INTERFAZ STREAMLIT
+# INTERFAZ STREAMLIT - VERSIÓN SIMPLIFICADA
 # =============================================================================
 
     def mostrar_interfaz_principal(self):
@@ -646,19 +631,22 @@ class CMYKRGConverterSimple:
             if st.session_state.tipo_usuario == "tecnico":
                 st.title("🖨️ Simulador de Consumo - MODO TÉCNICO 🔧")
             else:
-                st.title("🖨️ Simulador de Consumo - MODO USUARIO 👤")
+                st.title("🖨️ Simulador de Consumo de Tinta")
         
         with col_user:
             st.write(f"**Usuario:** {st.session_state.usuario_actual}")
-            if st.button("🚪 Cerrar Sesión", use_container_width=True):  # ✅ CORREGIDO
+            if st.button("🚪 Cerrar Sesión", use_container_width=True):
                 for key in list(st.session_state.keys()):
                     del st.session_state[key]
                 st.rerun()
         
         st.markdown("---")
         
-        # Pestañas principales
-        tab1, tab2, tab3 = st.tabs(["⚙️ Configuración y Cálculo", "📊 Resultados", "📋 Historial"])
+        # Pestañas diferentes según tipo de usuario
+        if st.session_state.tipo_usuario == "tecnico":
+            tab1, tab2, tab3 = st.tabs(["⚙️ Configuración y Cálculo", "📊 Resultados", "📋 Historial"])
+        else:
+            tab1, tab2 = st.tabs(["📁 Subir y Calcular", "📊 Resultados"])
         
         with tab1:
             self.mostrar_configuracion()
@@ -666,18 +654,22 @@ class CMYKRGConverterSimple:
         with tab2:
             self.mostrar_resultados()
             
-        with tab3:
-            self.mostrar_historial_procesamientos()
+        if st.session_state.tipo_usuario == "tecnico":
+            with tab3:
+                self.mostrar_historial_procesamientos()
     
     def mostrar_configuracion(self):
-        """Pestaña de configuración"""
-        st.header("Configuración del Análisis")
+        """Pestaña de configuración - VERSIÓN SIMPLIFICADA PARA USUARIOS"""
         
-        # Estado del sistema
-        estado_modelo = self.actualizar_estado_modelo()
-        st.info(estado_modelo)
+        if st.session_state.tipo_usuario == "tecnico":
+            st.header("Configuración del Análisis")
+            estado_modelo = self.actualizar_estado_modelo()
+            st.info(estado_modelo)
+        else:
+            st.header("📁 Subir Imagen y Calcular")
+            st.info("💡 Sube una imagen RGB para calcular el consumo de tinta")
         
-        # Upload de imagen
+        # Upload de imagen (común para ambos)
         uploaded_file = st.file_uploader(
             "📁 Subir imagen RGB",
             type=['jpg', 'jpeg', 'png', 'bmp', 'tif', 'tiff'],
@@ -685,16 +677,18 @@ class CMYKRGConverterSimple:
         )
         
         # Configuración de resolución
-        col_res, col_btn = st.columns([1, 2])
+        if st.session_state.tipo_usuario == "tecnico":
+            col_res, col_btn = st.columns([1, 2])
+        else:
+            col_res, col_btn = st.columns([1, 1])
         
         with col_res:
             resolucion = st.selectbox(
-                "🎯 Resolución Y (DPI)",
+                "🎯 Resolución (DPI)",
                 options=["600", "1200"],
                 index=0,
                 key="resolucion_select"
             )
-            # Actualizar modelo según resolución
             self.cambiar_resolucion(resolucion)
         
         # Información de la imagen
@@ -702,14 +696,19 @@ class CMYKRGConverterSimple:
             try:
                 image = Image.open(uploaded_file)
                 
-                col_img, col_info = st.columns([1, 2])
+                if st.session_state.tipo_usuario == "tecnico":
+                    col_img, col_info = st.columns([1, 2])
+                else:
+                    col_img, col_info = st.columns([1, 1])
                 
                 with col_img:
-                    # ✅ CORREGIDO - use_container_width en lugar de use_column_width
                     st.image(image, caption="Vista previa", use_container_width=True)
                 
                 with col_info:
-                    st.subheader("📊 Información de la Imagen")
+                    if st.session_state.tipo_usuario == "tecnico":
+                        st.subheader("📊 Información de la Imagen")
+                    else:
+                        st.subheader("📋 Información de la Imagen")
                     
                     filename = uploaded_file.name
                     width, height = image.size
@@ -719,27 +718,40 @@ class CMYKRGConverterSimple:
                     alto_cm = (height / dpi_real) * 2.54
                     area_m2 = (ancho_cm * alto_cm) / 10000.0
                     
-                    info_data = {
-                        "Archivo": filename,
-                        "Tamaño archivo": f"{uploaded_file.size:,} bytes",
-                        "Tamaño imagen": f"{width} × {height} píxeles",
-                        "Píxeles totales": f"{total_pixels:,}",
-                        "DPI detectado": f"{dpi_real:.0f}",
-                        "Dimensiones físicas": f"{ancho_cm:.1f} × {alto_cm:.1f} cm",
-                        "Área de impresión": f"{area_m2:.4f} m²",
-                        "Modo": image.mode
-                    }
+                    # Información simplificada para usuarios
+                    if st.session_state.tipo_usuario == "tecnico":
+                        info_data = {
+                            "Archivo": filename,
+                            "Tamaño archivo": f"{uploaded_file.size:,} bytes",
+                            "Tamaño imagen": f"{width} × {height} píxeles",
+                            "Píxeles totales": f"{total_pixels:,}",
+                            "DPI detectado": f"{dpi_real:.0f}",
+                            "Dimensiones físicas": f"{ancho_cm:.1f} × {alto_cm:.1f} cm",
+                            "Área de impresión": f"{area_m2:.4f} m²",
+                            "Modo": image.mode
+                        }
+                    else:
+                        info_data = {
+                            "Archivo": filename,
+                            "Tamaño": f"{width} × {height} píxeles",
+                            "Dimensiones": f"{ancho_cm:.1f} × {alto_cm:.1f} cm",
+                            "Área": f"{area_m2:.4f} m²"
+                        }
                     
                     for key, value in info_data.items():
                         st.write(f"**{key}:** {value}")
                 
                 # Botón de cálculo
-                col_btn1, col_btn2 = st.columns([2, 1])
+                if st.session_state.tipo_usuario == "tecnico":
+                    col_btn1, col_btn2 = st.columns([2, 1])
+                else:
+                    col_btn1, col_btn2 = st.columns([1, 1])
                 
                 with col_btn1:
-                    if st.button("🎯 CALCULAR CONSUMO DE TINTA", 
+                    btn_text = "🎯 CALCULAR CONSUMO DE TINTA" if st.session_state.tipo_usuario == "tecnico" else "🎯 CALCULAR CONSUMO"
+                    if st.button(btn_text, 
                                type="primary", 
-                               use_container_width=True,  # ✅ CORREGIDO
+                               use_container_width=True,
                                disabled=(self.modelo_actual is None)):
                         
                         if self.modelo_actual is None:
@@ -764,7 +776,7 @@ class CMYKRGConverterSimple:
             col_tec1, col_tec2, col_tec3 = st.columns(3)
             
             with col_tec1:
-                if st.button("🔄 Recargar Modelos Automáticamente", use_container_width=True):  # ✅ CORREGIDO
+                if st.button("🔄 Recargar Modelos Automáticamente", use_container_width=True):
                     self.cargar_modelos()
                     st.rerun()
             
@@ -772,12 +784,12 @@ class CMYKRGConverterSimple:
                 st.write("**Cargar Modelo Manual:**")
                 modelo_file = st.file_uploader("Subir modelo .pkl", type=['pkl'], key="model_upload")
                 modelo_res = st.selectbox("Para resolución:", ["600", "1200"])
-                if modelo_file and st.button("📥 Cargar Modelo", use_container_width=True):  # ✅ CORREGIDO
+                if modelo_file and st.button("📥 Cargar Modelo", use_container_width=True):
                     self.cargar_modelo_manual(modelo_res, modelo_file)
                     st.rerun()
             
             with col_tec3:
-                if st.button("📊 Ver Info del Sistema", use_container_width=True):  # ✅ CORREGIDO
+                if st.button("📊 Ver Info del Sistema", use_container_width=True):
                     st.write(f"**Directorio:** {self.script_dir}")
                     st.write(f"**Modelo 600 cargado:** {self.modelo_600 is not None}")
                     st.write(f"**Modelo 1200 cargado:** {self.modelo_1200 is not None}")
@@ -785,11 +797,11 @@ class CMYKRGConverterSimple:
                     st.write(f"**Archivos en sesión:** {len(st.session_state.historial_procesamientos)}")
     
     def mostrar_resultados(self):
-        """Mostrar resultados del cálculo"""
+        """Mostrar resultados del cálculo - VERSIÓN SIMPLIFICADA PARA USUARIOS"""
         st.header("📊 Resultados del Consumo")
         
         if st.session_state.ultimos_resultados is None:
-            st.info("ℹ️ Ejecuta un cálculo en la pestaña 'Configuración' para ver resultados aquí")
+            st.info("ℹ️ Ejecuta un cálculo en la pestaña anterior para ver resultados aquí")
             return
         
         resultados = st.session_state.ultimos_resultados
@@ -798,7 +810,7 @@ class CMYKRGConverterSimple:
             st.error("❌ No hay resultados válidos para mostrar")
             return
         
-        # Métricas principales
+        # Métricas principales (comunes para ambos)
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
@@ -828,28 +840,28 @@ class CMYKRGConverterSimple:
         # Información del archivo procesado
         st.info(f"📁 **Archivo procesado:** {resultados.get('archivo_procesado', 'N/A')}")
         
-        # Información detallada
-        with st.expander("📋 Detalles del Análisis", expanded=True):
-            col_det1, col_det2 = st.columns(2)
-            
-            with col_det1:
-                st.write("**Configuración:**")
-                st.write(f"- Resolución: {resultados['resolucion']}")
-                st.write(f"- DPI real detectado: {resultados.get('dpi_real', 'N/A')}")
-                st.write(f"- Dimensiones: {resultados['dimensiones']}")
-                st.write(f"- Método: Estimación CMYK Doble + RG Simple")
-            
-            with col_det2:
-                st.write("**Especificaciones:**")
-                st.write(f"- Densidad tinta: {densidad_tinta} g/ml")
-                st.write(f"- Resolución X fija: {resolucion_x} DPI")
-                st.write(f"- Configuración: GS4 5-10-15pl")
+        # Información detallada SOLO para técnicos
+        if st.session_state.tipo_usuario == "tecnico":
+            with st.expander("📋 Detalles del Análisis", expanded=True):
+                col_det1, col_det2 = st.columns(2)
+                
+                with col_det1:
+                    st.write("**Configuración:**")
+                    st.write(f"- Resolución: {resultados['resolucion']}")
+                    st.write(f"- DPI real detectado: {resultados.get('dpi_real', 'N/A')}")
+                    st.write(f"- Dimensiones: {resultados['dimensiones']}")
+                    st.write(f"- Método: Estimación CMYK Doble + RG Simple")
+                
+                with col_det2:
+                    st.write("**Especificaciones:**")
+                    st.write(f"- Densidad tinta: {densidad_tinta} g/ml")
+                    st.write(f"- Resolución X fija: {resolucion_x} DPI")
+                    st.write(f"- Configuración: GS4 5-10-15pl")
         
-        # Consumo por tinta (detalle para técnicos)
+        # Consumo por tinta SOLO para técnicos
         if st.session_state.tipo_usuario == "tecnico" and 'consumos_detallados' in resultados:
             st.subheader("🎨 Consumo Detallado por Tinta")
             
-            # Crear dataframe para mejor visualización
             tintas_data = []
             for tinta, datos in resultados['consumos_detallados'].items():
                 tintas_data.append({
@@ -863,7 +875,7 @@ class CMYKRGConverterSimple:
                 })
             
             df_tintas = pd.DataFrame(tintas_data)
-            st.dataframe(df_tintas, use_container_width=True)  # ✅ CORREGIDO
+            st.dataframe(df_tintas, use_container_width=True)
             
             # Gráfico de consumos
             st.subheader("📈 Distribución de Consumo por Tinta")
