@@ -89,7 +89,7 @@ def mostrar_login():
             
             if usuario_user:
                 password_user = st.text_input("Contraseña:", type="password", key="user_pass")
-                if st.button("🔓 Acceder como Usuario", key="user_btn", use_container_width=True):
+                if st.button("🔓 Acceder como Usuario", key="user_btn", width='stretch'):
                     usuario_data = usuarios_permitidos.get(usuario_user, {})
                     if usuario_data.get("password") == password_user:
                         st.session_state.autenticado = True
@@ -114,7 +114,7 @@ def mostrar_login():
             
             if tecnico_user:
                 password_tec = st.text_input("Contraseña:", type="password", key="tec_pass")
-                if st.button("🔧 Acceder como Técnico", key="tec_btn", use_container_width=True):
+                if st.button("🔧 Acceder como Técnico", key="tec_btn", width='stretch'):
                     usuario_data = usuarios_permitidos.get(tecnico_user, {})
                     if usuario_data.get("password") == password_tec:
                         st.session_state.autenticado = True
@@ -407,7 +407,7 @@ class CMYKRGConverterSimple:
         
         if historial_data:
             df_historial = pd.DataFrame(historial_data)
-            st.dataframe(df_historial, use_container_width=True)
+            st.dataframe(df_historial, width='stretch')
         
         stats = st.session_state.estadisticas_uso
         col1, col2, col3, col4 = st.columns(4)
@@ -648,7 +648,7 @@ class CMYKRGConverterSimple:
                 pass
 
 # =============================================================================
-# INTERFAZ STREAMLIT - SIN MONITOR DE MEMORIA
+# INTERFAZ STREAMLIT - ACTUALIZADA A width='stretch'
 # =============================================================================
 
     def mostrar_interfaz_principal(self):
@@ -670,7 +670,7 @@ class CMYKRGConverterSimple:
         
         with col_user:
             st.write(f"**Usuario:** {st.session_state.usuario_actual}")
-            if st.button("🚪 Cerrar Sesión", use_container_width=True):
+            if st.button("🚪 Cerrar Sesión", width='stretch'):
                 for key in list(st.session_state.keys()):
                     del st.session_state[key]
                 st.rerun()
@@ -737,7 +737,7 @@ class CMYKRGConverterSimple:
                     col_img, col_info = st.columns([1, 1])
                 
                 with col_img:
-                    st.image(image, caption="Vista previa", use_container_width=True)
+                    st.image(image, caption="Vista previa", width='stretch')
                 
                 with col_info:
                     if st.session_state.tipo_usuario == "tecnico":
@@ -786,7 +786,7 @@ class CMYKRGConverterSimple:
                     btn_text = "🎯 CALCULAR CONSUMO DE TINTA" if st.session_state.tipo_usuario == "tecnico" else "🎯 CALCULAR CONSUMO"
                     if st.button(btn_text, 
                                type="primary", 
-                               use_container_width=True,
+                               width='stretch',
                                disabled=(self.modelo_actual is None)):
                         
                         if self.modelo_actual is None:
@@ -812,7 +812,7 @@ class CMYKRGConverterSimple:
             col_tec1, col_tec2, col_tec3 = st.columns(3)
             
             with col_tec1:
-                if st.button("🔄 Recargar Modelos Automáticamente", use_container_width=True):
+                if st.button("🔄 Recargar Modelos Automáticamente", width='stretch'):
                     self.cargar_modelos()
                     st.rerun()
             
@@ -820,12 +820,12 @@ class CMYKRGConverterSimple:
                 st.write("**Cargar Modelo Manual:**")
                 modelo_file = st.file_uploader("Subir modelo .pkl", type=['pkl'], key="model_upload")
                 modelo_res = st.selectbox("Para resolución:", ["600", "1200"])
-                if modelo_file and st.button("📥 Cargar Modelo", use_container_width=True):
+                if modelo_file and st.button("📥 Cargar Modelo", width='stretch'):
                     self.cargar_modelo_manual(modelo_res, modelo_file)
                     st.rerun()
             
             with col_tec3:
-                if st.button("📊 Ver Info del Sistema", use_container_width=True):
+                if st.button("📊 Ver Info del Sistema", width='stretch'):
                     st.write(f"**Directorio:** {self.script_dir}")
                     st.write(f"**Modelo 600 cargado:** {self.modelo_600 is not None}")
                     st.write(f"**Modelo 1200 cargado:** {self.modelo_1200 is not None}")
@@ -911,7 +911,7 @@ class CMYKRGConverterSimple:
                 })
             
             df_tintas = pd.DataFrame(tintas_data)
-            st.dataframe(df_tintas, use_container_width=True)
+            st.dataframe(df_tintas, width='stretch')
             
             # Gráfico de consumos
             st.subheader("📈 Distribución de Consumo por Tinta")
