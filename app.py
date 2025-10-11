@@ -281,17 +281,15 @@ class CMYKRGConverterSimple:
     def detectar_dpi_real(self, img):
         """Detectar DPI de metadatos"""
         try:
-            dpi_x, dpi_y = img.info.get('dpi', (72, 72))
+            dpi_x, dpi_y = img.info.get('dpi', (None, None))
+            if dpi_x is None or dpi_y is None:
+                raise ValueError("No se encontraron metadatos DPI en la imagen")
             dpi_promedio = (dpi_x + dpi_y) / 2
             if dpi_promedio <= 1:
-                if st.session_state.tipo_usuario == "tecnico":
-                    st.warning("⚠️ DPI inválido detectado. Usando DPI por defecto (72).")
-                return 72  # Fallback to standard default DPI
+                raise ValueError("DPI inválido detectado en los metadatos de la imagen")
             return dpi_promedio
-        except:
-            if st.session_state.tipo_usuario == "tecnico":
-                st.warning("⚠️ No se pudo detectar DPI. Usando DPI por defecto (72).")
-            return 72  # Fallback to standard default DPI
+        except Exception as e:
+            raise ValueError(f"No se pudo detectar el DPI de la imagen: {str(e)}")
     
     def optimizar_imagen(self, img_array):
         """Optimizar imagen a 2,000,000 píxeles máximo (resize) - ORIGINAL"""
@@ -515,10 +513,15 @@ class CMYKRGConverterSimple:
                 'archivo_procesado': filename
             }
 
+        except ValueError as e:
+            st.error(f"❌ Error en cálculo: {str(e)}")
+            self.agregar_log_procesamiento(image, resolucion_y, None, exito=False, error_msg=str(e))
+            return None
         except Exception as e:
             st.error(f"❌ ERROR en cálculo: {str(e)}")
             import traceback
             traceback.print_exc()
+            self.agregar_log_procesamiento(image, resolucion_y, None, exito=False, error_msg=str(e))
             return None
 
     def procesar_imagen_por_lotes(self, uploaded_file, resolucion_y, batch_size=10000):
@@ -734,6 +737,9 @@ class CMYKRGConverterSimple:
             try:
                 image = Image.open(uploaded_file)
                 
+                # Verificar DPI antes de mostrar información
+                dpi_real = self.detectar_dpi_real(image)
+                
                 if st.session_state.tipo_usuario == "tecnico":
                     col_img, col_info = st.columns([1, 2])
                 else:
@@ -751,7 +757,6 @@ class CMYKRGConverterSimple:
                     filename = uploaded_file.name
                     width, height = image.size
                     total_pixels = width * height
-                    dpi_real = self.detectar_dpi_real(image)
                     ancho_cm = (width / dpi_real) * 2.54
                     alto_cm = (height / dpi_real) * 2.54
                     area_m2 = (ancho_cm * alto_cm) / 10000.0
@@ -804,8 +809,12 @@ class CMYKRGConverterSimple:
                                 else:
                                     st.error(f"❌ Error procesando {uploaded_file.name}")
                         
+            except ValueError as e:
+                st.error(f"❌ Error procesando imagen: {str(e)}")
+                self.agregar_log_procesamiento(uploaded_file, resolucion, None, exito=False, error_msg=str(e))
             except Exception as e:
                 st.error(f"❌ Error procesando imagen: {e}")
+                self.agregar_log_procesamiento(uploaded_file, resolucion, None, exito=False, error_msg=str(e))
         
         # Funciones técnicas (solo para técnicos)
         if st.session_state.tipo_usuario == "tecnico":
