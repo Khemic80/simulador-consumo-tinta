@@ -284,6 +284,9 @@ class CMYKRGConverterSimple:
             dpi_x, dpi_y = img.info.get('dpi', (None, None))
             if dpi_x is None or dpi_y is None:
                 raise ValueError("No se encontraron metadatos DPI en la imagen")
+            # Convertir IFDRational a float si es necesario
+            dpi_x = float(dpi_x) if hasattr(dpi_x, 'denominator') else dpi_x
+            dpi_y = float(dpi_y) if hasattr(dpi_y, 'denominator') else dpi_y
             dpi_promedio = (dpi_x + dpi_y) / 2
             if dpi_promedio <= 1:
                 raise ValueError("DPI inválido detectado en los metadatos de la imagen")
