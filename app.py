@@ -284,11 +284,14 @@ class CMYKRGConverterSimple:
             dpi_x, dpi_y = img.info.get('dpi', (72, 72))
             dpi_promedio = (dpi_x + dpi_y) / 2
             if dpi_promedio <= 1:
-                return 300
-            else:
-                return dpi_promedio
+                if st.session_state.tipo_usuario == "tecnico":
+                    st.warning("⚠️ DPI inválido detectado. Usando DPI por defecto (72).")
+                return 72  # Fallback to standard default DPI
+            return dpi_promedio
         except:
-            return 300
+            if st.session_state.tipo_usuario == "tecnico":
+                st.warning("⚠️ No se pudo detectar DPI. Usando DPI por defecto (72).")
+            return 72  # Fallback to standard default DPI
     
     def optimizar_imagen(self, img_array):
         """Optimizar imagen a 2,000,000 píxeles máximo (resize) - ORIGINAL"""
