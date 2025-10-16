@@ -19,7 +19,7 @@ Image.MAX_IMAGE_PIXELS = 1000000000  # 1 billón de píxeles (ORIGINAL)
 # Configuración fija (ORIGINAL)
 max_pixels = 2000000  # 2 millones (ORIGINAL)
 resolucion_x = 600  # Fijo
-densidad_tinta = 1.10  # g/ml
+densidad_tinta = 1.05  # g/ml
 
 # =============================================================================
 # SISTEMA DE AUTENTICACIÓN
@@ -457,7 +457,7 @@ class CMYKRGConverterSimple:
             if st.session_state.tipo_usuario == "tecnico":
                 st.info("🔍 Iniciando cálculo de consumo físico (MÉTODO v0.9)...")
             
-            densidad_tinta = 1.10
+            densidad_tinta = 1.05
             dpi_x = float(resolucion_x)
             dpi_y = float(resolucion_y)
             
