@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from PIL import Image, ImageResampling
+from PIL import Image
 import joblib
 import glob
 import os
@@ -158,6 +158,29 @@ class CMYKRGConverterSimple:
         
         self.cargar_modelos()
     
+    def _resize_image(self, image, size):
+        """Función auxiliar para resize compatible con todas las versiones de Pillow"""
+        try:
+            # Pillow >= 9.1.0
+            return image.resize(size, Image.Resampling.LANCZOS)
+        except AttributeError:
+            try:
+                # Pillow < 9.1.0
+                return image.resize(size, Image.LANCZOS)
+            except AttributeError:
+                # Fallback
+                return image.resize(size, Image.ANTIALIAS)
+    
+    def _thumbnail_image(self, image, size):
+        """Función auxiliar para thumbnail compatible"""
+        try:
+            image.thumbnail(size, Image.Resampling.LANCZOS)
+        except AttributeError:
+            try:
+                image.thumbnail(size, Image.LANCZOS)
+            except AttributeError:
+                image.thumbnail(size, Image.ANTIALIAS)
+    
     def cargar_modelos(self):
         """Cargar modelos específicos para 600 y 1200 DPI"""
         try:
@@ -297,7 +320,7 @@ class CMYKRGConverterSimple:
             raise ValueError(f"No se pudo detectar el DPI de la imagen: {str(e)}")
     
     def optimizar_imagen(self, img_array):
-        """Optimizar imagen a 2,000,000 píxeles máximo (resize) - ORIGINAL"""
+        """Optimizar imagen a 2,000,000 píxeles máximo (resize) - COMPATIBLE"""
         height, width = img_array.shape[:2]
         total_pixels = height * width
         
@@ -309,7 +332,7 @@ class CMYKRGConverterSimple:
         new_height = int(height * scale_factor)
         
         img_pil = Image.fromarray(img_array)
-        img_resized = img_pil.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        img_resized = self._resize_image(img_pil, (new_width, new_height))
         return np.array(img_resized), True
     
     def aplicar_ingenieria_caracteristicas(self, X):
@@ -699,7 +722,7 @@ class CMYKRGConverterSimple:
                         # Mostrar miniatura
                         try:
                             image = Image.open(file)
-                            image.thumbnail((80, 80))
+                            self._thumbnail_image(image, (80, 80))
                             st.image(image, use_column_width=True)
                         except:
                             st.write("🖼️")
@@ -720,7 +743,7 @@ class CMYKRGConverterSimple:
                     with col1:
                         try:
                             image = Image.open(file)
-                            image.thumbnail((60, 60))
+                            self._thumbnail_image(image, (60, 60))
                             st.image(image, use_column_width=True)
                         except:
                             st.write("🖼️")
