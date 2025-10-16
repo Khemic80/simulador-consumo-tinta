@@ -993,293 +993,130 @@ class CMYKRGConverterSimple:
         )
 
     def mostrar_resultados_tabla(self):
-    """Mostrar tabla de resultados para procesamiento individual y múltiple"""
-    st.header("📋 Tabla de Resultados")
-    
-    # VERIFICAR SI HAY RESULTADOS INDIVIDUALES O MÚLTIPLES
-    tiene_individual = st.session_state.ultimos_resultados is not None
-    tiene_multiple = len(st.session_state.resultados_lote) > 0
-    
-    if not tiene_individual and not tiene_multiple:
-        st.info("ℹ️ No hay resultados disponibles. Procesa una imagen en las pestañas '📁 Individual' o '📦 Múltiple'.")
-        return
-    
-    datos_tabla = []
-    
-    # AGREGAR RESULTADO INDIVIDUAL SI EXISTE
-    if tiene_individual:
-        resultado_individual = st.session_state.ultimos_resultados
-        if resultado_individual:
-            datos_tabla.append({
-                'Archivo': resultado_individual.get('archivo_procesado', 'Individual'),
-                'Estado': '✅ Éxito',
-                'Consumo (g/m²)': resultado_individual['total_g_m2'],
-                'Consumo Total (g)': resultado_individual['total_g'],
-                'Volumen Total (ml)': resultado_individual['total_ml'],
-                'Área (m²)': resultado_individual['area_m2']
-            })
-    
-    # AGREGAR RESULTADOS MÚLTIPLES SI EXISTEN
-    if tiene_multiple:
-        for resultado in st.session_state.resultados_lote:
-            if resultado['resultados']:
+        """Mostrar tabla de resultados para procesamiento individual y múltiple"""
+        st.header("📋 Tabla de Resultados")
+        
+        # VERIFICAR SI HAY RESULTADOS INDIVIDUALES O MÚLTIPLES
+        tiene_individual = st.session_state.ultimos_resultados is not None
+        tiene_multiple = len(st.session_state.resultados_lote) > 0
+        
+        if not tiene_individual and not tiene_multiple:
+            st.info("ℹ️ No hay resultados disponibles. Procesa una imagen en las pestañas '📁 Individual' o '📦 Múltiple'.")
+            return
+        
+        datos_tabla = []
+        
+        # AGREGAR RESULTADO INDIVIDUAL SI EXISTE
+        if tiene_individual:
+            resultado_individual = st.session_state.ultimos_resultados
+            if resultado_individual:
                 datos_tabla.append({
-                    'Archivo': resultado['archivo'],
-                    'Estado': resultado['estado'],
-                    'Consumo (g/m²)': resultado['resultados']['total_g_m2'],
-                    'Consumo Total (g)': resultado['resultados']['total_g'],
-                    'Volumen Total (ml)': resultado['resultados']['total_ml'],
-                    'Área (m²)': resultado['resultados']['area_m2']
+                    'Archivo': resultado_individual.get('archivo_procesado', 'Individual'),
+                    'Estado': '✅ Éxito',
+                    'Consumo (g/m²)': resultado_individual['total_g_m2'],
+                    'Consumo Total (g)': resultado_individual['total_g'],
+                    'Volumen Total (ml)': resultado_individual['total_ml'],
+                    'Área (m²)': resultado_individual['area_m2']
                 })
-            else:
-                datos_tabla.append({
-                    'Archivo': resultado['archivo'],
-                    'Estado': resultado['estado'],
-                    'Consumo (g/m²)': None,
-                    'Consumo Total (g)': None,
-                    'Volumen Total (ml)': None,
-                    'Área (m²)': None
-                })
-    
-    # Mostrar tabla
-    df_resultados = pd.DataFrame(datos_tabla)
-    
-    # Formatear números en la tabla
-    styled_df = df_resultados.style.format({
-        'Consumo (g/m²)': '{:.2f}',
-        'Consumo Total (g)': '{:.2f}',
-        'Volumen Total (ml)': '{:.2f}',
-        'Área (m²)': '{:.4f}'
-    }, na_rep="N/A")
-    
-    st.dataframe(styled_df, use_container_width=True)
-    
-    # Métricas resumen - SOLO PARA RESULTADOS VÁLIDOS
-    resultados_validos = [r for r in datos_tabla if r['Consumo (g/m²)'] is not None]
-    if resultados_validos:
-        st.subheader("📊 Resumen General")
         
-        total_consumo_g = sum(r['Consumo Total (g)'] for r in resultados_validos)
-        total_volumen_ml = sum(r['Volumen Total (ml)'] for r in resultados_validos)
-        total_area_m2 = sum(r['Área (m²)'] for r in resultados_validos)
-        consumo_promedio_g_m2 = sum(r['Consumo (g/m²)'] for r in resultados_validos) / len(resultados_validos)
+        # AGREGAR RESULTADOS MÚLTIPLES SI EXISTEN
+        if tiene_multiple:
+            for resultado in st.session_state.resultados_lote:
+                if resultado['resultados']:
+                    datos_tabla.append({
+                        'Archivo': resultado['archivo'],
+                        'Estado': resultado['estado'],
+                        'Consumo (g/m²)': resultado['resultados']['total_g_m2'],
+                        'Consumo Total (g)': resultado['resultados']['total_g'],
+                        'Volumen Total (ml)': resultado['resultados']['total_ml'],
+                        'Área (m²)': resultado['resultados']['area_m2']
+                    })
+                else:
+                    datos_tabla.append({
+                        'Archivo': resultado['archivo'],
+                        'Estado': resultado['estado'],
+                        'Consumo (g/m²)': None,
+                        'Consumo Total (g)': None,
+                        'Volumen Total (ml)': None,
+                        'Área (m²)': None
+                    })
         
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Archivos exitosos", len(resultados_validos))
-        with col2:
-            st.metric("Consumo Total", f"{total_consumo_g:.2f} g")
-        with col3:
-            st.metric("Volumen Total", f"{total_volumen_ml:.2f} ml")
-        with col4:
-            st.metric("Área Total", f"{total_area_m2:.4f} m²")
+        # Mostrar tabla
+        df_resultados = pd.DataFrame(datos_tabla)
         
-        st.metric("Consumo Promedio por m²", f"{consumo_promedio_g_m2:.2f} g/m²")
-
-    # =============================================================================
-    # INTERFAZ STREAMLIT - ACTUALIZADA CON MEJORAS
-    # =============================================================================
-
-    def mostrar_interfaz_principal(self):
-        """Interfaz principal de la aplicación"""
-        st.set_page_config(
-            page_title="Simulador Consumo Tinta",
-            page_icon="🖨️",
-            layout="wide"
-        )
+        # Formatear números en la tabla
+        styled_df = df_resultados.style.format({
+            'Consumo (g/m²)': '{:.2f}',
+            'Consumo Total (g)': '{:.2f}',
+            'Volumen Total (ml)': '{:.2f}',
+            'Área (m²)': '{:.4f}'
+        }, na_rep="N/A")
         
-        # Header con información de usuario
-        col_title, col_user = st.columns([3, 1])
+        st.dataframe(styled_df, use_container_width=True)
         
-        with col_title:
-            if st.session_state.tipo_usuario == "tecnico":
-                st.title("🖨️ Simulador de Consumo - MODO TÉCNICO 🔧")
-            else:
-                st.title("🖨️ Simulador de Consumo de Tinta")
-        
-        with col_user:
-            st.write(f"**Usuario:** {st.session_state.usuario_actual}")
-            if st.button("🚪 Cerrar Sesión", use_container_width=True):
-                for key in list(st.session_state.keys()):
-                    del st.session_state[key]
-                st.rerun()
-        
-        st.markdown("---")
-        
-        # Pestañas diferentes según tipo de usuario
-        if st.session_state.tipo_usuario == "tecnico":
-            tab1, tab2, tab3, tab4, tab5 = st.tabs(["⚙️ Configuración", "📁 Individual", "📦 Múltiple", "📋 Resultados", "📊 Historial"])
-        else:
-            tab1, tab2, tab3 = st.tabs(["📁 Individual", "📦 Múltiple", "📋 Resultados"])
-        
-        with tab1:
-            self.mostrar_configuracion()
-        
-        with tab2:
-            self.mostrar_procesamiento_multiple()
+        # Métricas resumen - SOLO PARA RESULTADOS VÁLIDOS
+        resultados_validos = [r for r in datos_tabla if r['Consumo (g/m²)'] is not None]
+        if resultados_validos:
+            st.subheader("📊 Resumen General")
             
-        with tab3:
-            self.mostrar_resultados_tabla()
-        
-        if st.session_state.tipo_usuario == "tecnico":
-            with tab4:
-                self.mostrar_resultados_individuales()
-            with tab5:
-                self.mostrar_historial_procesamientos()
+            total_consumo_g = sum(r['Consumo Total (g)'] for r in resultados_validos)
+            total_volumen_ml = sum(r['Volumen Total (ml)'] for r in resultados_validos)
+            total_area_m2 = sum(r['Área (m²)'] for r in resultados_validos)
+            consumo_promedio_g_m2 = sum(r['Consumo (g/m²)'] for r in resultados_validos) / len(resultados_validos)
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Archivos exitosos", len(resultados_validos))
+            with col2:
+                st.metric("Consumo Total", f"{total_consumo_g:.2f} g")
+            with col3:
+                st.metric("Volumen Total", f"{total_volumen_ml:.2f} ml")
+            with col4:
+                st.metric("Área Total", f"{total_area_m2:.4f} m²")
+            
+            st.metric("Consumo Promedio por m²", f"{consumo_promedio_g_m2:.2f} g/m²")
 
-    def mostrar_configuracion(self):
-        """Pestaña de configuración individual"""
+    def mostrar_procesamiento_individual(self):
+        """Interfaz simplificada para procesamiento individual de usuarios normales"""
+        st.header("📁 Procesar Imagen Individual")
         
-        if st.session_state.tipo_usuario == "tecnico":
-            st.header("Configuración del Análisis")
-            estado_modelo = self.actualizar_estado_modelo()
-            st.info(estado_modelo)
-        else:
-            st.header("📁 Subir Imagen y Calcular")
-            st.info("💡 Sube una imagen RGB para calcular el consumo de tinta")
-        
-        # Upload de imagen (común para ambos)
         uploaded_file = st.file_uploader(
             "📁 Subir imagen RGB",
             type=['jpg', 'jpeg', 'png', 'bmp', 'tif', 'tiff'],
             help="Formatos soportados: JPG, PNG, BMP, TIFF",
-            key="individual_upload"
+            key="individual_user_upload"
         )
         
-        # Configuración de resolución
-        if st.session_state.tipo_usuario == "tecnico":
-            col_res, col_btn = st.columns([1, 2])
-        else:
-            col_res, col_btn = st.columns([1, 1])
+        resolucion = st.selectbox(
+            "🎯 Resolución (DPI)",
+            options=["600", "1200"],
+            index=0,
+            key="individual_resolucion"
+        )
         
-        with col_res:
-            resolucion = st.selectbox(
-                "🎯 Resolución (DPI)",
-                options=["600", "1200"],
-                index=0,
-                key="resolucion_select"
-            )
-            self.cambiar_resolucion(resolucion)
+        self.cambiar_resolucion(resolucion)
         
-        # Información de la imagen
-        if uploaded_file is not None:
-            try:
-                image = Image.open(uploaded_file)
+        if uploaded_file and st.button("🎯 CALCULAR CONSUMO", type="primary", use_container_width=True):
+            if self.modelo_actual is None:
+                st.error("❌ No hay modelo cargado para la resolución seleccionada")
+                return
+            
+            with st.spinner("Procesando imagen..."):
+                resultados = self.procesar_imagen_por_lotes(uploaded_file, resolucion)
+                st.session_state.ultimos_resultados = resultados
                 
-                # Verificar DPI antes de mostrar información
-                dpi_real = self.detectar_dpi_real(image)
-                
-                if st.session_state.tipo_usuario == "tecnico":
-                    col_img, col_info = st.columns([1, 2])
+                if resultados:
+                    st.success("✅ ¡Procesado correctamente! Ve a la pestaña 'Resultados'")
                 else:
-                    col_img, col_info = st.columns([1, 1])
-                
-                with col_img:
-                    st.image(image, caption="Vista previa", width=300)
-                
-                with col_info:
-                    if st.session_state.tipo_usuario == "tecnico":
-                        st.subheader("📊 Información de la Imagen")
-                    else:
-                        st.subheader("📋 Información de la Imagen")
-                    
-                    filename = uploaded_file.name
-                    width, height = image.size
-                    total_pixels = width * height
-                    ancho_cm = (width / dpi_real) * 2.54
-                    alto_cm = (height / dpi_real) * 2.54
-                    area_m2 = (ancho_cm * alto_cm) / 10000.0
-                    
-                    # Información simplificada para usuarios
-                    if st.session_state.tipo_usuario == "tecnico":
-                        info_data = {
-                            "Archivo": filename,
-                            "Tamaño archivo": f"{uploaded_file.size:,} bytes",
-                            "Tamaño imagen": f"{width} × {height} píxeles",
-                            "Píxeles totales": f"{total_pixels:,}",
-                            "DPI detectado": f"{dpi_real:.0f}",
-                            "Dimensiones físicas": f"{ancho_cm:.1f} × {alto_cm:.1f} cm",
-                            "Área de impresión": f"{area_m2:.4f} m²",
-                            "Modo": image.mode
-                        }
-                    else:
-                        info_data = {
-                            "Archivo": filename,
-                            "Tamaño": f"{width} × {height} píxeles",
-                            "Dimensiones": f"{ancho_cm:.1f} × {alto_cm:.1f} cm",
-                            "Área": f"{area_m2:.4f} m²"
-                        }
-                    
-                    for key, value in info_data.items():
-                        st.write(f"**{key}:** {value}")
-                
-                # Botón de cálculo
-                if st.session_state.tipo_usuario == "tecnico":
-                    col_btn1, col_btn2 = st.columns([2, 1])
-                else:
-                    col_btn1, col_btn2 = st.columns([1, 1])
-                
-                with col_btn1:
-                    btn_text = "🎯 CALCULAR CONSUMO DE TINTA" if st.session_state.tipo_usuario == "tecnico" else "🎯 CALCULAR CONSUMO"
-                    if st.button(btn_text, 
-                               type="primary", 
-                               use_container_width=True,
-                               disabled=(self.modelo_actual is None)):
-                        
-                        if self.modelo_actual is None:
-                            st.error("❌ No hay modelo cargado para la resolución seleccionada")
-                        else:
-                            with st.spinner("Procesando imagen (modo optimizado)..."):
-                                # USAR LA VERSIÓN POR LOTES
-                                resultados = self.procesar_imagen_por_lotes(uploaded_file, resolucion, batch_size=10000)
-                                st.session_state.ultimos_resultados = resultados
-                                if resultados:
-                                    st.success(f"✅ {uploaded_file.name} procesado correctamente! Ve a la pestaña 'Resultados'")
-                                else:
-                                    st.error(f"❌ Error procesando {uploaded_file.name}")
-    
-            except ValueError as e:
-                st.error(f"❌ Error procesando imagen: {str(e)}")
-                self.agregar_log_procesamiento(uploaded_file, resolucion, None, exito=False, error_msg=str(e))
-            except Exception as e:
-                st.error(f"❌ Error procesando imagen: {e}")
-                self.agregar_log_procesamiento(uploaded_file, resolucion, None, exito=False, error_msg=str(e))
-        
-        # Funciones técnicas (solo para técnicos)
-        if st.session_state.tipo_usuario == "tecnico":
-            st.markdown("---")
-            st.subheader("🛠️ Funciones Técnicas")
-            
-            col_tec1, col_tec2, col_tec3 = st.columns(3)
-            
-            with col_tec1:
-                if st.button("🔄 Recargar Modelos Automáticamente", use_container_width=True):
-                    self.cargar_modelos()
-                    st.rerun()
-            
-            with col_tec2:
-                st.write("**Cargar Modelo Manual:**")
-                modelo_file = st.file_uploader("Subir modelo .pkl", type=['pkl'], key="model_upload")
-                modelo_res = st.selectbox("Para resolución:", ["600", "1200"])
-                if modelo_file and st.button("📥 Cargar Modelo", use_container_width=True):
-                    self.cargar_modelo_manual(modelo_res, modelo_file)
-                    st.rerun()
-            
-            with col_tec3:
-                if st.button("📊 Ver Info del Sistema", use_container_width=True):
-                    st.write(f"**Directorio:** {self.script_dir}")
-                    st.write(f"**Modelo 600 cargado:** {self.modelo_600 is not None}")
-                    st.write(f"**Modelo 1200 cargado:** {self.modelo_1200 is not None}")
-                    st.write(f"**Modelo actual:** {self.modelo_actual is not None}")
-                    st.write(f"**Archivos en sesión:** {len(st.session_state.historial_procesamientos)}")
+                    st.error("❌ Error procesando la imagen")
 
-    def mostrar_resultados_individuales(self):
-        """Mostrar resultados del cálculo individual - SOLO PARA TÉCNICOS"""
+    def mostrar_resultados_detallados(self):
+        """Mostrar resultados detallados - SOLO PARA TÉCNICOS"""
         if st.session_state.tipo_usuario != "tecnico":
             st.info("🔒 Esta función solo está disponible para usuarios técnicos")
             return
             
-        st.header("📊 Resultados del Consumo Individual")
+        st.header("📊 Resultados Detallados del Análisis")
         
         if st.session_state.ultimos_resultados is None:
             st.info("ℹ️ Ejecuta un cálculo en la pestaña 'Configuración' para ver resultados aquí")
@@ -1368,6 +1205,184 @@ class CMYKRGConverterSimple:
             })
             
             st.bar_chart(chart_data.set_index('Tinta'))
+
+    # =============================================================================
+    # INTERFAZ STREAMLIT - ACTUALIZADA CON MEJORAS
+    # =============================================================================
+
+    def mostrar_interfaz_principal(self):
+        """Interfaz principal de la aplicación"""
+        st.set_page_config(
+            page_title="Simulador Consumo Tinta",
+            page_icon="🖨️",
+            layout="wide"
+        )
+        
+        # Header con información de usuario
+        col_title, col_user = st.columns([3, 1])
+        
+        with col_title:
+            if st.session_state.tipo_usuario == "tecnico":
+                st.title("🖨️ Simulador de Consumo - MODO TÉCNICO 🔧")
+            else:
+                st.title("🖨️ Simulador de Consumo de Tinta")
+        
+        with col_user:
+            st.write(f"**Usuario:** {st.session_state.usuario_actual}")
+            if st.button("🚪 Cerrar Sesión", use_container_width=True):
+                for key in list(st.session_state.keys()):
+                    del st.session_state[key]
+                st.rerun()
+        
+        st.markdown("---")
+        
+        # Pestañas diferentes según tipo de usuario
+        if st.session_state.tipo_usuario == "tecnico":
+            tab1, tab2, tab3, tab4, tab5 = st.tabs(["⚙️ Configuración", "📁 Individual", "📦 Múltiple", "📋 Resultados", "📊 Historial"])
+        else:
+            tab1, tab2, tab3 = st.tabs(["📁 Individual", "📦 Múltiple", "📋 Resultados"])
+        
+        # Configurar las pestañas según tipo de usuario
+        if st.session_state.tipo_usuario == "tecnico":
+            with tab1:
+                self.mostrar_configuracion()
+            with tab2:
+                self.mostrar_procesamiento_individual()
+            with tab3:
+                self.mostrar_procesamiento_multiple()
+            with tab4:
+                self.mostrar_resultados_tabla()
+            with tab5:
+                self.mostrar_historial_procesamientos()
+        else:
+            # Para usuarios normales
+            with tab1:
+                self.mostrar_procesamiento_individual()
+            with tab2:
+                self.mostrar_procesamiento_multiple()
+            with tab3:
+                self.mostrar_resultados_tabla()
+
+    def mostrar_configuracion(self):
+        """Pestaña de configuración para técnicos"""
+        if st.session_state.tipo_usuario != "tecnico":
+            st.info("🔒 Esta función solo está disponible para usuarios técnicos")
+            return
+            
+        st.header("⚙️ Configuración del Análisis")
+        estado_modelo = self.actualizar_estado_modelo()
+        st.info(estado_modelo)
+        
+        # Upload de imagen para técnicos
+        uploaded_file = st.file_uploader(
+            "📁 Subir imagen RGB",
+            type=['jpg', 'jpeg', 'png', 'bmp', 'tif', 'tiff'],
+            help="Formatos soportados: JPG, PNG, BMP, TIFF",
+            key="tecnico_upload"
+        )
+        
+        # Configuración de resolución
+        col_res, col_btn = st.columns([1, 2])
+        
+        with col_res:
+            resolucion = st.selectbox(
+                "🎯 Resolución (DPI)",
+                options=["600", "1200"],
+                index=0,
+                key="tecnico_resolucion"
+            )
+            self.cambiar_resolucion(resolucion)
+        
+        # Información de la imagen para técnicos
+        if uploaded_file is not None:
+            try:
+                image = Image.open(uploaded_file)
+                
+                # Verificar DPI antes de mostrar información
+                dpi_real = self.detectar_dpi_real(image)
+                
+                col_img, col_info = st.columns([1, 2])
+                
+                with col_img:
+                    st.image(image, caption="Vista previa", width=300)
+                
+                with col_info:
+                    st.subheader("📊 Información de la Imagen")
+                    
+                    filename = uploaded_file.name
+                    width, height = image.size
+                    total_pixels = width * height
+                    ancho_cm = (width / dpi_real) * 2.54
+                    alto_cm = (height / dpi_real) * 2.54
+                    area_m2 = (ancho_cm * alto_cm) / 10000.0
+                    
+                    info_data = {
+                        "Archivo": filename,
+                        "Tamaño archivo": f"{uploaded_file.size:,} bytes",
+                        "Tamaño imagen": f"{width} × {height} píxeles",
+                        "Píxeles totales": f"{total_pixels:,}",
+                        "DPI detectado": f"{dpi_real:.0f}",
+                        "Dimensiones físicas": f"{ancho_cm:.1f} × {alto_cm:.1f} cm",
+                        "Área de impresión": f"{area_m2:.4f} m²",
+                        "Modo": image.mode
+                    }
+                    
+                    for key, value in info_data.items():
+                        st.write(f"**{key}:** {value}")
+                
+                # Botón de cálculo para técnicos
+                col_btn1, col_btn2 = st.columns([2, 1])
+                
+                with col_btn1:
+                    if st.button("🎯 CALCULAR CONSUMO DE TINTA", 
+                               type="primary", 
+                               use_container_width=True,
+                               disabled=(self.modelo_actual is None)):
+                        
+                        if self.modelo_actual is None:
+                            st.error("❌ No hay modelo cargado para la resolución seleccionada")
+                        else:
+                            with st.spinner("Procesando imagen (modo optimizado)..."):
+                                resultados = self.procesar_imagen_por_lotes(uploaded_file, resolucion, batch_size=10000)
+                                st.session_state.ultimos_resultados = resultados
+                                if resultados:
+                                    st.success(f"✅ {uploaded_file.name} procesado correctamente! Ve a la pestaña 'Resultados Detallados'")
+                                else:
+                                    st.error(f"❌ Error procesando {uploaded_file.name}")
+    
+            except ValueError as e:
+                st.error(f"❌ Error procesando imagen: {str(e)}")
+                self.agregar_log_procesamiento(uploaded_file, resolucion, None, exito=False, error_msg=str(e))
+            except Exception as e:
+                st.error(f"❌ Error procesando imagen: {e}")
+                self.agregar_log_procesamiento(uploaded_file, resolucion, None, exito=False, error_msg=str(e))
+        
+        # Funciones técnicas (solo para técnicos)
+        st.markdown("---")
+        st.subheader("🛠️ Funciones Técnicas")
+        
+        col_tec1, col_tec2, col_tec3 = st.columns(3)
+        
+        with col_tec1:
+            if st.button("🔄 Recargar Modelos Automáticamente", use_container_width=True):
+                self.cargar_modelos()
+                st.rerun()
+        
+        with col_tec2:
+            st.write("**Cargar Modelo Manual:**")
+            modelo_file = st.file_uploader("Subir modelo .pkl", type=['pkl'], key="model_upload")
+            modelo_res = st.selectbox("Para resolución:", ["600", "1200"])
+            if modelo_file and st.button("📥 Cargar Modelo", use_container_width=True):
+                self.cargar_modelo_manual(modelo_res, modelo_file)
+                st.rerun()
+        
+        with col_tec3:
+            if st.button("📊 Ver Info del Sistema", use_container_width=True):
+                st.write(f"**Directorio:** {self.script_dir}")
+                st.write(f"**Modelo 600 cargado:** {self.modelo_600 is not None}")
+                st.write(f"**Modelo 1200 cargado:** {self.modelo_1200 is not None}")
+                st.write(f"**Modelo actual:** {self.modelo_actual is not None}")
+                st.write(f"**Archivos en sesión:** {len(st.session_state.historial_procesamientos)}")
 
 # =============================================================================
 # EJECUCIÓN PRINCIPAL
