@@ -1,6 +1,4 @@
-[global]
-showGitHubLink = false
-disableWatchdogWarning = true
+
 
 [client]
 showErrorDetails = false
