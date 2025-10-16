@@ -132,7 +132,7 @@ def mostrar_login():
     st.info("💡 **Nota:** Esta aplicación es de acceso restringido. Contacta al administrador para obtener credenciales.")
 
 # =============================================================================
-# CLASE PRINCIPAL - VERSIÓN CON PROCESAMIENTO POR LOTES PERO RESULTADOS ORIGINALES
+# CLASE PRINCIPAL - CON PROCESAMIENTO MÚLTIPLE
 # =============================================================================
 
 class CMYKRGConverterSimple:
@@ -455,7 +455,7 @@ class CMYKRGConverterSimple:
             if st.session_state.tipo_usuario == "tecnico":
                 st.info(f"🔢 Puntos por m²: {puntos_por_m2:,.0f}")
             
-            vol_por_punto_ml = 19e-9
+            vol_por_punto_ml = 15e-9
             vol_max_ml_m2 = puntos_por_m2 * vol_por_punto_ml
             
             if st.session_state.tipo_usuario == "tecnico":
@@ -656,9 +656,269 @@ class CMYKRGConverterSimple:
             except:
                 pass
 
-# =============================================================================
-# INTERFAZ STREAMLIT - ACTUALIZADA A width='stretch'
-# =============================================================================
+    # =============================================================================
+    # NUEVAS FUNCIONES - PROCESAMIENTO MÚLTIPLE
+    # =============================================================================
+
+    def mostrar_procesamiento_multiple(self):
+        """Interfaz para procesar múltiples imágenes con restricciones por tipo de usuario"""
+        
+        if st.session_state.tipo_usuario == "tecnico":
+            st.header("📁 Procesamiento Múltiple - MODO TÉCNICO")
+        else:
+            st.header("📁 Procesamiento Múltiple")
+        
+        # Upload múltiple
+        uploaded_files = st.file_uploader(
+            "📁 Subir múltiples imágenes",
+            type=['jpg', 'jpeg', 'png', 'bmp', 'tif', 'tiff'],
+            accept_multiple_files=True,
+            help="Selecciona varias imágenes para procesar en lote"
+        )
+        
+        # Configuración común
+        resolucion = st.selectbox(
+            "🎯 Resolución (DPI)",
+            options=["600", "1200"],
+            index=0,
+            key="batch_resolucion"
+        )
+        
+        self.cambiar_resolucion(resolucion)
+        
+        if uploaded_files:
+            # Mostrar info diferente según tipo de usuario
+            if st.session_state.tipo_usuario == "tecnico":
+                st.subheader(f"📋 Archivos a procesar ({len(uploaded_files)} imágenes)")
+                # Lista detallada para técnicos
+                for i, file in enumerate(uploaded_files):
+                    col1, col2, col3 = st.columns([3, 1, 1])
+                    with col1:
+                        st.write(f"**{i+1}. {file.name}** ({file.size:,} bytes)")
+                    with col2:
+                        st.write("⏳ En espera")
+                    with col3:
+                        if st.button(f"👁️ Vista", key=f"view_{i}"):
+                            image = Image.open(file)
+                            st.image(image, caption=file.name, width=200)
+            else:
+                # Lista simplificada para usuarios normales
+                st.subheader(f"Archivos seleccionados: {len(uploaded_files)}")
+                archivos_lista = [f"• {file.name}" for file in uploaded_files]
+                st.write("\n".join(archivos_lista[:5]))  # Mostrar solo primeros 5
+                if len(uploaded_files) > 5:
+                    st.info(f"... y {len(uploaded_files) - 5} archivos más")
+            
+            # Botón de procesamiento en lote
+            btn_text = "🚀 PROCESAR TODAS LAS IMÁGENES" if st.session_state.tipo_usuario == "tecnico" else "🚀 CALCULAR CONSUMO"
+            if st.button(btn_text, type="primary", width='stretch'):
+                if self.modelo_actual is None:
+                    st.error("❌ No hay modelo cargado para la resolución seleccionada")
+                    return
+                
+                self.procesar_lote_imagenes(uploaded_files, resolucion)
+
+    def procesar_lote_imagenes(self, uploaded_files, resolucion):
+        """Procesar múltiples imágenes y mostrar resultados consolidados"""
+        
+        resultados_lote = []
+        barra_progreso = st.progress(0)
+        texto_estado = st.empty()
+        
+        for i, uploaded_file in enumerate(uploaded_files):
+            # Actualizar progreso
+            progreso = i / len(uploaded_files)
+            barra_progreso.progress(progreso)
+            texto_estado.text(f"Procesando {i+1}/{len(uploaded_files)}: {uploaded_file.name}")
+            
+            try:
+                # Procesar imagen individual
+                resultados = self.procesar_imagen_por_lotes(uploaded_file, resolucion)
+                
+                if resultados:
+                    resultados_lote.append({
+                        'archivo': uploaded_file.name,
+                        'resultados': resultados,
+                        'estado': '✅ Éxito'
+                    })
+                else:
+                    resultados_lote.append({
+                        'archivo': uploaded_file.name,
+                        'resultados': None,
+                        'estado': '❌ Error'
+                    })
+                    
+            except Exception as e:
+                resultados_lote.append({
+                    'archivo': uploaded_file.name,
+                    'resultados': None,
+                    'estado': f'❌ Error: {str(e)}'
+                })
+        
+        # Progreso final
+        barra_progreso.progress(1.0)
+        texto_estado.text("Procesamiento completado!")
+        
+        # Mostrar resumen consolidado
+        self.mostrar_resumen_lote(resultados_lote)
+
+    def mostrar_resumen_lote(self, resultados_lote):
+        """Mostrar resumen del procesamiento por lote con restricciones de usuario"""
+        
+        if st.session_state.tipo_usuario == "tecnico":
+            st.subheader("📊 Resumen del Procesamiento por Lote")
+        else:
+            st.subheader("📊 Resultados del Procesamiento")
+        
+        # Crear DataFrame de resumen según tipo de usuario
+        datos_resumen = []
+        consumo_total_g = 0
+        area_total_m2 = 0
+        archivos_exitosos = 0
+        
+        for resultado in resultados_lote:
+            if resultado['resultados']:
+                archivos_exitosos += 1
+                consumo_total_g += resultado['resultados']['total_g']
+                area_total_m2 += resultado['resultados']['area_m2']
+                
+                if st.session_state.tipo_usuario == "tecnico":
+                    # Info detallada para técnicos
+                    datos_resumen.append({
+                        'Archivo': resultado['archivo'],
+                        'Estado': resultado['estado'],
+                        'Consumo (g/m²)': f"{resultado['resultados']['total_g_m2']:.2f}",
+                        'Consumo Total (g)': f"{resultado['resultados']['total_g']:.2f}",
+                        'Área (m²)': f"{resultado['resultados']['area_m2']:.4f}",
+                        'Dimensiones': resultado['resultados']['dimensiones']
+                    })
+                else:
+                    # Info simplificada para usuarios normales
+                    datos_resumen.append({
+                        'Archivo': resultado['archivo'],
+                        'Estado': resultado['estado'],
+                        'Consumo Total (g)': f"{resultado['resultados']['total_g']:.2f}",
+                        'Área (m²)': f"{resultado['resultados']['area_m2']:.4f}"
+                    })
+            else:
+                if st.session_state.tipo_usuario == "tecnico":
+                    datos_resumen.append({
+                        'Archivo': resultado['archivo'],
+                        'Estado': resultado['estado'],
+                        'Consumo (g/m²)': 'N/A',
+                        'Consumo Total (g)': 'N/A',
+                        'Área (m²)': 'N/A',
+                        'Dimensiones': 'N/A'
+                    })
+                else:
+                    datos_resumen.append({
+                        'Archivo': resultado['archivo'],
+                        'Estado': resultado['estado'],
+                        'Consumo Total (g)': 'N/A',
+                        'Área (m²)': 'N/A'
+                    })
+        
+        # Mostrar tabla resumen
+        if datos_resumen:
+            df_resumen = pd.DataFrame(datos_resumen)
+            st.dataframe(df_resumen, width='stretch')
+        
+        # Métricas totales (diferentes según usuario)
+        if archivos_exitosos > 0:
+            if st.session_state.tipo_usuario == "tecnico":
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Archivos exitosos", f"{archivos_exitosos}/{len(resultados_lote)}")
+                with col2:
+                    st.metric("Consumo Total", f"{consumo_total_g:.2f} g")
+                with col3:
+                    st.metric("Área Total", f"{area_total_m2:.4f} m²")
+                with col4:
+                    consumo_promedio = consumo_total_g / archivos_exitosos
+                    st.metric("Consumo Promedio", f"{consumo_promedio:.2f} g")
+            else:
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Archivos procesados", f"{archivos_exitosos}")
+                with col2:
+                    st.metric("Consumo Total", f"{consumo_total_g:.2f} g")
+                with col3:
+                    st.metric("Área Total", f"{area_total_m2:.4f} m²")
+        
+        # Botón para descargar reporte (solo técnicos o con info restringida)
+        if archivos_exitosos > 0:
+            self.generar_reporte_descarga(resultados_lote)
+
+    def generar_reporte_descarga(self, resultados_lote):
+        """Generar reporte de descarga con información apropiada por tipo de usuario"""
+        
+        # Preparar datos para CSV según tipo de usuario
+        datos_csv = []
+        for resultado in resultados_lote:
+            if resultado['resultados']:
+                if st.session_state.tipo_usuario == "tecnico":
+                    # Reporte detallado para técnicos
+                    datos_csv.append({
+                        'archivo': resultado['archivo'],
+                        'estado': resultado['estado'],
+                        'consumo_g_m2': resultado['resultados']['total_g_m2'],
+                        'consumo_total_g': resultado['resultados']['total_g'],
+                        'volumen_total_ml': resultado['resultados']['total_ml'],
+                        'area_m2': resultado['resultados']['area_m2'],
+                        'dimensiones': resultado['resultados']['dimensiones'],
+                        'resolucion': resultado['resultados']['resolucion'],
+                        'dpi_real': resultado['resultados']['dpi_real']
+                    })
+                else:
+                    # Reporte simplificado para usuarios
+                    datos_csv.append({
+                        'archivo': resultado['archivo'],
+                        'estado': resultado['estado'],
+                        'consumo_total_g': resultado['resultados']['total_g'],
+                        'area_m2': resultado['resultados']['area_m2'],
+                        'dimensiones': resultado['resultados']['dimensiones']
+                    })
+            else:
+                if st.session_state.tipo_usuario == "tecnico":
+                    datos_csv.append({
+                        'archivo': resultado['archivo'],
+                        'estado': resultado['estado'],
+                        'consumo_g_m2': None,
+                        'consumo_total_g': None,
+                        'volumen_total_ml': None,
+                        'area_m2': None,
+                        'dimensiones': None,
+                        'resolucion': None,
+                        'dpi_real': None
+                    })
+                else:
+                    datos_csv.append({
+                        'archivo': resultado['archivo'],
+                        'estado': resultado['estado'],
+                        'consumo_total_g': None,
+                        'area_m2': None,
+                        'dimensiones': None
+                    })
+        
+        # Crear DataFrame y CSV
+        df_csv = pd.DataFrame(datos_csv)
+        csv = df_csv.to_csv(index=False, encoding='utf-8')
+        
+        # Texto del botón según usuario
+        btn_text = "📥 Descargar Reporte Detallado (CSV)" if st.session_state.tipo_usuario == "tecnico" else "📥 Descargar Resultados (CSV)"
+        
+        # Botón de descarga
+        st.download_button(
+            label=btn_text,
+            data=csv,
+            file_name=f"reporte_consumo_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+            width='stretch'
+        )
+
+    # =============================================================================
+    # INTERFAZ STREAMLIT - ACTUALIZADA CON PROCESAMIENTO MÚLTIPLE
+    # =============================================================================
 
     def mostrar_interfaz_principal(self):
         """Interfaz principal de la aplicación"""
@@ -688,22 +948,26 @@ class CMYKRGConverterSimple:
         
         # Pestañas diferentes según tipo de usuario
         if st.session_state.tipo_usuario == "tecnico":
-            tab1, tab2, tab3 = st.tabs(["⚙️ Configuración y Cálculo", "📊 Resultados", "📋 Historial"])
+            tab1, tab2, tab3, tab4 = st.tabs(["⚙️ Configuración", "📁 Individual", "📊 Lote", "📋 Historial"])
         else:
-            tab1, tab2 = st.tabs(["📁 Subir y Calcular", "📊 Resultados"])
+            tab1, tab2 = st.tabs(["📁 Individual", "📊 Procesamiento Múltiple"])
         
         with tab1:
             self.mostrar_configuracion()
         
-        with tab2:
-            self.mostrar_resultados()
-            
         if st.session_state.tipo_usuario == "tecnico":
+            with tab2:
+                self.mostrar_procesamiento_multiple()
             with tab3:
+                self.mostrar_resultados()
+            with tab4:
                 self.mostrar_historial_procesamientos()
-    
+        else:
+            with tab2:
+                self.mostrar_procesamiento_multiple()
+
     def mostrar_configuracion(self):
-        """Pestaña de configuración"""
+        """Pestaña de configuración individual"""
         
         if st.session_state.tipo_usuario == "tecnico":
             st.header("Configuración del Análisis")
@@ -717,7 +981,8 @@ class CMYKRGConverterSimple:
         uploaded_file = st.file_uploader(
             "📁 Subir imagen RGB",
             type=['jpg', 'jpeg', 'png', 'bmp', 'tif', 'tiff'],
-            help="Formatos soportados: JPG, PNG, BMP, TIFF"
+            help="Formatos soportados: JPG, PNG, BMP, TIFF",
+            key="individual_upload"
         )
         
         # Configuración de resolución
@@ -846,9 +1111,9 @@ class CMYKRGConverterSimple:
                     st.write(f"**Modelo 1200 cargado:** {self.modelo_1200 is not None}")
                     st.write(f"**Modelo actual:** {self.modelo_actual is not None}")
                     st.write(f"**Archivos en sesión:** {len(st.session_state.historial_procesamientos)}")
-    
+
     def mostrar_resultados(self):
-        """Mostrar resultados del cálculo"""
+        """Mostrar resultados del cálculo individual"""
         st.header("📊 Resultados del Consumo")
         
         if st.session_state.ultimos_resultados is None:
