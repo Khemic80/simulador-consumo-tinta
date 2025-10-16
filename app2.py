@@ -722,7 +722,7 @@ class CMYKRGConverterSimple:
                         # Mostrar miniatura
                         try:
                             image = Image.open(file)
-                            self._thumbnail_image(image, (80, 80))
+                            self._thumbnail_image(image, (120, 120))
                             st.image(image, use_column_width=True)
                         except:
                             st.write("🖼️")
@@ -743,7 +743,7 @@ class CMYKRGConverterSimple:
                     with col1:
                         try:
                             image = Image.open(file)
-                            self._thumbnail_image(image, (60, 60))
+                            self._thumbnail_image(image, (100, 100))
                             st.image(image, use_column_width=True)
                         except:
                             st.write("🖼️")
@@ -909,27 +909,27 @@ class CMYKRGConverterSimple:
         for resultado in resultados_lote:
             if resultado['resultados']:
                 if st.session_state.tipo_usuario == "tecnico":
-                    # Reporte detallado para técnicos
+                    # Reporte detallado para técnicos - FORMATAR NÚMEROS
                     datos_csv.append({
                         'archivo': resultado['archivo'],
                         'estado': resultado['estado'],
-                        'consumo_g_m2': resultado['resultados']['total_g_m2'],
-                        'consumo_total_g': resultado['resultados']['total_g'],
-                        'volumen_total_ml': resultado['resultados']['total_ml'],
-                        'area_m2': resultado['resultados']['area_m2'],
+                        'consumo_g_m2': f"{resultado['resultados']['total_g_m2']:.2f}",
+                        'consumo_total_g': f"{resultado['resultados']['total_g']:.2f}",
+                        'volumen_total_ml': f"{resultado['resultados']['total_ml']:.2f}",
+                        'area_m2': f"{resultado['resultados']['area_m2']:.4f}",
                         'dimensiones': resultado['resultados']['dimensiones'],
                         'resolucion': resultado['resultados']['resolucion'],
-                        'dpi_real': resultado['resultados']['dpi_real']
+                        'dpi_real': f"{resultado['resultados']['dpi_real']:.1f}"
                     })
                 else:
-                    # Reporte simplificado para usuarios
+                    # Reporte simplificado para usuarios - FORMATAR NÚMEROS
                     datos_csv.append({
                         'archivo': resultado['archivo'],
                         'estado': resultado['estado'],
-                        'consumo_g_m2': resultado['resultados']['total_g_m2'],
-                        'consumo_total_g': resultado['resultados']['total_g'],
-                        'volumen_total_ml': resultado['resultados']['total_ml'],
-                        'area_m2': resultado['resultados']['area_m2'],
+                        'consumo_g_m2': f"{resultado['resultados']['total_g_m2']:.2f}",
+                        'consumo_total_g': f"{resultado['resultados']['total_g']:.2f}",
+                        'volumen_total_ml': f"{resultado['resultados']['total_ml']:.2f}",
+                        'area_m2': f"{resultado['resultados']['area_m2']:.4f}",
                         'dimensiones': resultado['resultados']['dimensiones']
                     })
             else:
@@ -937,23 +937,23 @@ class CMYKRGConverterSimple:
                     datos_csv.append({
                         'archivo': resultado['archivo'],
                         'estado': resultado['estado'],
-                        'consumo_g_m2': None,
-                        'consumo_total_g': None,
-                        'volumen_total_ml': None,
-                        'area_m2': None,
-                        'dimensiones': None,
-                        'resolucion': None,
-                        'dpi_real': None
+                        'consumo_g_m2': 'N/A',
+                        'consumo_total_g': 'N/A',
+                        'volumen_total_ml': 'N/A',
+                        'area_m2': 'N/A',
+                        'dimensiones': 'N/A',
+                        'resolucion': 'N/A',
+                        'dpi_real': 'N/A'
                     })
                 else:
                     datos_csv.append({
                         'archivo': resultado['archivo'],
                         'estado': resultado['estado'],
-                        'consumo_g_m2': None,
-                        'consumo_total_g': None,
-                        'volumen_total_ml': None,
-                        'area_m2': None,
-                        'dimensiones': None
+                        'consumo_g_m2': 'N/A',
+                        'consumo_total_g': 'N/A',
+                        'volumen_total_ml': 'N/A',
+                        'area_m2': 'N/A',
+                        'dimensiones': 'N/A'
                     })
         
         # Crear DataFrame y CSV
@@ -961,15 +961,15 @@ class CMYKRGConverterSimple:
         csv = df_csv.to_csv(index=False, encoding='utf-8')
         
         # Texto del botón según usuario
-        btn_text = "📥 Descargar Reporte Detallado (CSV)" if st.session_state.tipo_usuario == "tecnico" else "📥 Descargar Resultados (CSV)"
+        btn_text = "📥 Descargar Informee Detallado (CSV)" if st.session_state.tipo_usuario == "tecnico" else "📥 Descargar Resultados (CSV)"
         
         # Botón de descarga
         st.download_button(
             label=btn_text,
             data=csv,
-            file_name=f"reporte_consumo_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            file_name=f"informe_consumo_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
             mime="text/csv",
-            width='stretch'
+            use_container_width=True
         )
 
     def mostrar_resultados_tabla(self):
@@ -1297,7 +1297,7 @@ class CMYKRGConverterSimple:
                 st.write("**Especificaciones:**")
                 st.write(f"- Densidad tinta: {densidad_tinta} g/ml")
                 st.write(f"- Resolución X fija: {resolucion_x} DPI")
-                st.write(f"- Configuración: GS4 5-10-15pl")
+                st.write(f"- Configuración: GS4 6.3-12.6-18.9pl")
         
         # Consumo por tinta SOLO para técnicos
         if 'consumos_detallados' in resultados:
@@ -1308,10 +1308,10 @@ class CMYKRGConverterSimple:
                 tintas_data.append({
                     'Tinta': tinta,
                     'Cobertura (%)': f"{datos['cobertura_promedio']:.1f}%",
-                    'Consumo (g/m²)': f"{datos['masa_g_m2']:.4f}",
-                    'Volumen (ml/m²)': f"{datos['volumen_ml_m2']:.6f}",
-                    'Total (g)': f"{datos['g_total']:.4f}",
-                    'Total (ml)': f"{datos['ml_total']:.4f}",
+                    'Consumo (g/m²)': f"{datos['masa_g_m2']:.2f}",
+                    'Volumen (ml/m²)': f"{datos['volumen_ml_m2']:.2f}",
+                    'Total (g)': f"{datos['g_total']:.2f}",
+                    'Total (ml)': f"{datos['ml_total']:.2f}",
                     'Tipo Cabezal': "Doble" if datos['factores_cabezal'] == 2.0 else "Simple"
                 })
             
