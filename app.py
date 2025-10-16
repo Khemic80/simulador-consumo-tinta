@@ -19,7 +19,7 @@ Image.MAX_IMAGE_PIXELS = 1000000000  # 1 billón de píxeles (ORIGINAL)
 # Configuración fija (ORIGINAL)
 max_pixels = 2000000  # 2 millones (ORIGINAL)
 resolucion_x = 600  # Fijo
-densidad_tinta = 1.10  # g/ml
+densidad_tinta = 1.05  # g/ml
 
 # =============================================================================
 # SISTEMA DE AUTENTICACIÓN
