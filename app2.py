@@ -14,12 +14,12 @@ import datetime
 # CONFIGURACIÓN GLOBAL - MANTENER ORIGINAL
 # =============================================================================
 
-Image.MAX_IMAGE_PIXELS = 2000000000  # 2 billones de píxeles (ORIGINAL)
+Image.MAX_IMAGE_PIXELS = 1000000000  # 1 billón de píxeles (ORIGINAL)
 
 # Configuración fija (ORIGINAL)
 max_pixels = 2000000  # 2 millones (ORIGINAL)
 resolucion_x = 600  # Fijo
-densidad_tinta = 1.10  # g/ml
+densidad_tinta = 1.05  # g/ml
 
 # =============================================================================
 # SISTEMA DE AUTENTICACIÓN
@@ -91,7 +91,7 @@ def mostrar_login():
             
             if usuario_user:
                 password_user = st.text_input("Contraseña:", type="password", key="user_pass")
-                if st.button("🔓 Acceder como Usuario", key="user_btn", width='stretch'):
+                if st.button("🔓 Acceder como Usuario", key="user_btn", use_container_width=True):
                     usuario_data = usuarios_permitidos.get(usuario_user, {})
                     if usuario_data.get("password") == password_user:
                         st.session_state.autenticado = True
@@ -116,7 +116,7 @@ def mostrar_login():
             
             if tecnico_user:
                 password_tec = st.text_input("Contraseña:", type="password", key="tec_pass")
-                if st.button("🔧 Acceder como Técnico", key="tec_btn", width='stretch'):
+                if st.button("🔧 Acceder como Técnico", key="tec_btn", use_container_width=True):
                     usuario_data = usuarios_permitidos.get(tecnico_user, {})
                     if usuario_data.get("password") == password_tec:
                         st.session_state.autenticado = True
@@ -436,7 +436,7 @@ class CMYKRGConverterSimple:
         
         if historial_data:
             df_historial = pd.DataFrame(historial_data)
-            st.dataframe(df_historial, width='stretch')
+            st.dataframe(df_historial, use_container_width=True)
         
         stats = st.session_state.estadisticas_uso
         col1, col2, col3, col4 = st.columns(4)
@@ -457,7 +457,7 @@ class CMYKRGConverterSimple:
             if st.session_state.tipo_usuario == "tecnico":
                 st.info("🔍 Iniciando cálculo de consumo físico (MÉTODO v0.9)...")
             
-            densidad_tinta = 1.10
+            densidad_tinta = 1.05
             dpi_x = float(resolucion_x)
             dpi_y = float(resolucion_y)
             
@@ -480,7 +480,7 @@ class CMYKRGConverterSimple:
             if st.session_state.tipo_usuario == "tecnico":
                 st.info(f"🔢 Puntos por m²: {puntos_por_m2:,.0f}")
             
-            vol_por_punto_ml = 19e-9
+            vol_por_punto_ml = 15e-9
             vol_max_ml_m2 = puntos_por_m2 * vol_por_punto_ml
             
             if st.session_state.tipo_usuario == "tecnico":
@@ -682,11 +682,11 @@ class CMYKRGConverterSimple:
                 pass
 
     # =============================================================================
-    # NUEVAS FUNCIONES - PROCESAMIENTO MÚLTIPLE
+    # NUEVAS FUNCIONES - PROCESAMIENTO MÚLTIPLE CON MEJORAS
     # =============================================================================
 
     def mostrar_procesamiento_multiple(self):
-        """Interfaz para procesar múltiples imágenes con restricciones por tipo de usuario"""
+        """Interfaz para procesar múltiples imágenes con MINIATURAS MEJORADAS"""
         
         if st.session_state.tipo_usuario == "tecnico":
             st.header("📦 Procesamiento Múltiple - MODO TÉCNICO")
@@ -715,16 +715,26 @@ class CMYKRGConverterSimple:
             # Mostrar info diferente según tipo de usuario
             if st.session_state.tipo_usuario == "tecnico":
                 st.subheader(f"📋 Archivos a procesar ({len(uploaded_files)} imágenes)")
-                # Lista detallada para técnicos con miniaturas
+                # Lista detallada para técnicos con MINIATURAS MEJORADAS
                 for i, file in enumerate(uploaded_files):
                     col1, col2, col3, col4 = st.columns([1, 3, 1, 1])
                     with col1:
-                        # Mostrar miniatura
+                        # Mostrar miniatura MEJORADA
                         try:
                             image = Image.open(file)
-                            self._thumbnail_image(image, (120, 120))
-                            st.image(image, use_column_width=True)
-                        except:
+                            # Crear miniatura de mayor tamaño para mejor calidad
+                            thumbnail_size = (120, 120)
+                            image.thumbnail(thumbnail_size, Image.Resampling.LANCZOS)
+                            
+                            # Crear un canvas del tamaño exacto para evitar distorsión
+                            thumbnail = Image.new('RGB', thumbnail_size, (255, 255, 255))
+                            # Centrar la miniatura en el canvas
+                            x_offset = (thumbnail_size[0] - image.size[0]) // 2
+                            y_offset = (thumbnail_size[1] - image.size[1]) // 2
+                            thumbnail.paste(image, (x_offset, y_offset))
+                            
+                            st.image(thumbnail, use_container_width=True)
+                        except Exception as e:
                             st.write("🖼️")
                     with col2:
                         st.write(f"**{file.name}**")
@@ -732,20 +742,30 @@ class CMYKRGConverterSimple:
                     with col3:
                         st.write("⏳ En espera")
                     with col4:
-                        if st.button(f"👁️", key=f"view_{i}", help="Vista previa"):
+                        if st.button(f"👁️", key=f"view_{i}", help="Vista previa", use_container_width=True):
                             image = Image.open(file)
                             st.image(image, caption=file.name, width=300)
             else:
-                # Lista simplificada para usuarios normales con miniaturas
+                # Lista simplificada para usuarios normales con MINIATURAS MEJORADAS
                 st.subheader(f"Archivos seleccionados: {len(uploaded_files)}")
                 for i, file in enumerate(uploaded_files[:5]):  # Mostrar solo primeros 5 con miniaturas
                     col1, col2 = st.columns([1, 4])
                     with col1:
                         try:
                             image = Image.open(file)
-                            self._thumbnail_image(image, (100, 100))
-                            st.image(image, use_column_width=True)
-                        except:
+                            # Crear miniatura de mayor tamaño para mejor calidad
+                            thumbnail_size = (100, 100)
+                            image.thumbnail(thumbnail_size, Image.Resampling.LANCZOS)
+                            
+                            # Crear un canvas del tamaño exacto para evitar distorsión
+                            thumbnail = Image.new('RGB', thumbnail_size, (255, 255, 255))
+                            # Centrar la miniatura en el canvas
+                            x_offset = (thumbnail_size[0] - image.size[0]) // 2
+                            y_offset = (thumbnail_size[1] - image.size[1]) // 2
+                            thumbnail.paste(image, (x_offset, y_offset))
+                            
+                            st.image(thumbnail, use_container_width=True)
+                        except Exception as e:
                             st.write("🖼️")
                     with col2:
                         st.write(f"**{file.name}**")
@@ -754,7 +774,7 @@ class CMYKRGConverterSimple:
             
             # Botón de procesamiento en lote
             btn_text = "🚀 PROCESAR TODAS LAS IMÁGENES" if st.session_state.tipo_usuario == "tecnico" else "🚀 CALCULAR CONSUMO"
-            if st.button(btn_text, type="primary", width='stretch'):
+            if st.button(btn_text, type="primary", use_container_width=True):
                 if self.modelo_actual is None:
                     st.error("❌ No hay modelo cargado para la resolución seleccionada")
                     return
@@ -873,7 +893,7 @@ class CMYKRGConverterSimple:
         # Mostrar tabla resumen
         if datos_resumen:
             df_resumen = pd.DataFrame(datos_resumen)
-            st.dataframe(df_resumen, width='stretch')
+            st.dataframe(df_resumen, use_container_width=True)
         
         # Métricas totales (diferentes según usuario)
         if archivos_exitosos > 0:
@@ -902,14 +922,14 @@ class CMYKRGConverterSimple:
             self.generar_reporte_descarga(resultados_lote)
 
     def generar_reporte_descarga(self, resultados_lote):
-        """Generar reporte de descarga con información apropiada por tipo de usuario"""
+        """Generar reporte de descarga con FORMATO MEJORADO para CSV"""
         
         # Preparar datos para CSV según tipo de usuario
         datos_csv = []
         for resultado in resultados_lote:
             if resultado['resultados']:
                 if st.session_state.tipo_usuario == "tecnico":
-                    # Reporte detallado para técnicos - FORMATAR NÚMEROS
+                    # Reporte detallado para técnicos - FORMATO MEJORADO
                     datos_csv.append({
                         'archivo': resultado['archivo'],
                         'estado': resultado['estado'],
@@ -922,7 +942,7 @@ class CMYKRGConverterSimple:
                         'dpi_real': f"{resultado['resultados']['dpi_real']:.1f}"
                     })
                 else:
-                    # Reporte simplificado para usuarios - FORMATAR NÚMEROS
+                    # Reporte simplificado para usuarios - FORMATO MEJORADO
                     datos_csv.append({
                         'archivo': resultado['archivo'],
                         'estado': resultado['estado'],
@@ -961,7 +981,7 @@ class CMYKRGConverterSimple:
         csv = df_csv.to_csv(index=False, encoding='utf-8')
         
         # Texto del botón según usuario
-        btn_text = "📥 Descargar Informee Detallado (CSV)" if st.session_state.tipo_usuario == "tecnico" else "📥 Descargar Resultados (CSV)"
+        btn_text = "📥 Descargar Informe Detallado (CSV)" if st.session_state.tipo_usuario == "tecnico" else "📥 Descargar Resultados (CSV)"
         
         # Botón de descarga
         st.download_button(
@@ -1013,7 +1033,7 @@ class CMYKRGConverterSimple:
             'Área (m²)': '{:.4f}'
         }, na_rep="N/A")
         
-        st.dataframe(styled_df, width='stretch')
+        st.dataframe(styled_df, use_container_width=True)
         
         # Métricas resumen
         resultados_exitosos = [r for r in st.session_state.resultados_lote if r['resultados']]
@@ -1038,7 +1058,7 @@ class CMYKRGConverterSimple:
             st.metric("Consumo Promedio por m²", f"{consumo_promedio_g_m2:.2f} g/m²")
 
     # =============================================================================
-    # INTERFAZ STREAMLIT - ACTUALIZADA CON PROCESAMIENTO MÚLTIPLE
+    # INTERFAZ STREAMLIT - ACTUALIZADA CON MEJORAS
     # =============================================================================
 
     def mostrar_interfaz_principal(self):
@@ -1060,7 +1080,7 @@ class CMYKRGConverterSimple:
         
         with col_user:
             st.write(f"**Usuario:** {st.session_state.usuario_actual}")
-            if st.button("🚪 Cerrar Sesión", width='stretch'):
+            if st.button("🚪 Cerrar Sesión", use_container_width=True):
                 for key in list(st.session_state.keys()):
                     del st.session_state[key]
                 st.rerun()
@@ -1184,7 +1204,7 @@ class CMYKRGConverterSimple:
                     btn_text = "🎯 CALCULAR CONSUMO DE TINTA" if st.session_state.tipo_usuario == "tecnico" else "🎯 CALCULAR CONSUMO"
                     if st.button(btn_text, 
                                type="primary", 
-                               width='stretch',
+                               use_container_width=True,
                                disabled=(self.modelo_actual is None)):
                         
                         if self.modelo_actual is None:
@@ -1214,7 +1234,7 @@ class CMYKRGConverterSimple:
             col_tec1, col_tec2, col_tec3 = st.columns(3)
             
             with col_tec1:
-                if st.button("🔄 Recargar Modelos Automáticamente", width='stretch'):
+                if st.button("🔄 Recargar Modelos Automáticamente", use_container_width=True):
                     self.cargar_modelos()
                     st.rerun()
             
@@ -1222,12 +1242,12 @@ class CMYKRGConverterSimple:
                 st.write("**Cargar Modelo Manual:**")
                 modelo_file = st.file_uploader("Subir modelo .pkl", type=['pkl'], key="model_upload")
                 modelo_res = st.selectbox("Para resolución:", ["600", "1200"])
-                if modelo_file and st.button("📥 Cargar Modelo", width='stretch'):
+                if modelo_file and st.button("📥 Cargar Modelo", use_container_width=True):
                     self.cargar_modelo_manual(modelo_res, modelo_file)
                     st.rerun()
             
             with col_tec3:
-                if st.button("📊 Ver Info del Sistema", width='stretch'):
+                if st.button("📊 Ver Info del Sistema", use_container_width=True):
                     st.write(f"**Directorio:** {self.script_dir}")
                     st.write(f"**Modelo 600 cargado:** {self.modelo_600 is not None}")
                     st.write(f"**Modelo 1200 cargado:** {self.modelo_1200 is not None}")
@@ -1297,7 +1317,7 @@ class CMYKRGConverterSimple:
                 st.write("**Especificaciones:**")
                 st.write(f"- Densidad tinta: {densidad_tinta} g/ml")
                 st.write(f"- Resolución X fija: {resolucion_x} DPI")
-                st.write(f"- Configuración: GS4 6.3-12.6-18.9pl")
+                st.write(f"- Configuración: GS4 5-10-15pl")
         
         # Consumo por tinta SOLO para técnicos
         if 'consumos_detallados' in resultados:
@@ -1308,15 +1328,15 @@ class CMYKRGConverterSimple:
                 tintas_data.append({
                     'Tinta': tinta,
                     'Cobertura (%)': f"{datos['cobertura_promedio']:.1f}%",
-                    'Consumo (g/m²)': f"{datos['masa_g_m2']:.2f}",
-                    'Volumen (ml/m²)': f"{datos['volumen_ml_m2']:.2f}",
-                    'Total (g)': f"{datos['g_total']:.2f}",
-                    'Total (ml)': f"{datos['ml_total']:.2f}",
+                    'Consumo (g/m²)': f"{datos['masa_g_m2']:.4f}",
+                    'Volumen (ml/m²)': f"{datos['volumen_ml_m2']:.6f}",
+                    'Total (g)': f"{datos['g_total']:.4f}",
+                    'Total (ml)': f"{datos['ml_total']:.4f}",
                     'Tipo Cabezal': "Doble" if datos['factores_cabezal'] == 2.0 else "Simple"
                 })
             
             df_tintas = pd.DataFrame(tintas_data)
-            st.dataframe(df_tintas, width='stretch')
+            st.dataframe(df_tintas, use_container_width=True)
             
             # Gráfico de consumos
             st.subheader("📈 Distribución de Consumo por Tinta")
