@@ -993,15 +993,34 @@ class CMYKRGConverterSimple:
         )
 
     def mostrar_resultados_tabla(self):
-        """Mostrar tabla de resultados para procesamiento múltiple"""
-        st.header("📋 Tabla de Resultados")
-        
-        if not st.session_state.resultados_lote:
-            st.info("ℹ️ No hay resultados de procesamiento múltiple. Ve a la pestaña '📦 Procesamiento Múltiple' para procesar archivos.")
-            return
-        
-        # Crear tabla de resultados
-        datos_tabla = []
+    """Mostrar tabla de resultados para procesamiento individual y múltiple"""
+    st.header("📋 Tabla de Resultados")
+    
+    # VERIFICAR SI HAY RESULTADOS INDIVIDUALES O MÚLTIPLES
+    tiene_individual = st.session_state.ultimos_resultados is not None
+    tiene_multiple = len(st.session_state.resultados_lote) > 0
+    
+    if not tiene_individual and not tiene_multiple:
+        st.info("ℹ️ No hay resultados disponibles. Procesa una imagen en las pestañas '📁 Individual' o '📦 Múltiple'.")
+        return
+    
+    datos_tabla = []
+    
+    # AGREGAR RESULTADO INDIVIDUAL SI EXISTE
+    if tiene_individual:
+        resultado_individual = st.session_state.ultimos_resultados
+        if resultado_individual:
+            datos_tabla.append({
+                'Archivo': resultado_individual.get('archivo_procesado', 'Individual'),
+                'Estado': '✅ Éxito',
+                'Consumo (g/m²)': resultado_individual['total_g_m2'],
+                'Consumo Total (g)': resultado_individual['total_g'],
+                'Volumen Total (ml)': resultado_individual['total_ml'],
+                'Área (m²)': resultado_individual['area_m2']
+            })
+    
+    # AGREGAR RESULTADOS MÚLTIPLES SI EXISTEN
+    if tiene_multiple:
         for resultado in st.session_state.resultados_lote:
             if resultado['resultados']:
                 datos_tabla.append({
@@ -1021,41 +1040,41 @@ class CMYKRGConverterSimple:
                     'Volumen Total (ml)': None,
                     'Área (m²)': None
                 })
+    
+    # Mostrar tabla
+    df_resultados = pd.DataFrame(datos_tabla)
+    
+    # Formatear números en la tabla
+    styled_df = df_resultados.style.format({
+        'Consumo (g/m²)': '{:.2f}',
+        'Consumo Total (g)': '{:.2f}',
+        'Volumen Total (ml)': '{:.2f}',
+        'Área (m²)': '{:.4f}'
+    }, na_rep="N/A")
+    
+    st.dataframe(styled_df, use_container_width=True)
+    
+    # Métricas resumen - SOLO PARA RESULTADOS VÁLIDOS
+    resultados_validos = [r for r in datos_tabla if r['Consumo (g/m²)'] is not None]
+    if resultados_validos:
+        st.subheader("📊 Resumen General")
         
-        # Mostrar tabla
-        df_resultados = pd.DataFrame(datos_tabla)
+        total_consumo_g = sum(r['Consumo Total (g)'] for r in resultados_validos)
+        total_volumen_ml = sum(r['Volumen Total (ml)'] for r in resultados_validos)
+        total_area_m2 = sum(r['Área (m²)'] for r in resultados_validos)
+        consumo_promedio_g_m2 = sum(r['Consumo (g/m²)'] for r in resultados_validos) / len(resultados_validos)
         
-        # Formatear números en la tabla
-        styled_df = df_resultados.style.format({
-            'Consumo (g/m²)': '{:.2f}',
-            'Consumo Total (g)': '{:.2f}',
-            'Volumen Total (ml)': '{:.2f}',
-            'Área (m²)': '{:.4f}'
-        }, na_rep="N/A")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Archivos exitosos", len(resultados_validos))
+        with col2:
+            st.metric("Consumo Total", f"{total_consumo_g:.2f} g")
+        with col3:
+            st.metric("Volumen Total", f"{total_volumen_ml:.2f} ml")
+        with col4:
+            st.metric("Área Total", f"{total_area_m2:.4f} m²")
         
-        st.dataframe(styled_df, use_container_width=True)
-        
-        # Métricas resumen
-        resultados_exitosos = [r for r in st.session_state.resultados_lote if r['resultados']]
-        if resultados_exitosos:
-            st.subheader("📊 Resumen General")
-            
-            total_consumo_g = sum(r['resultados']['total_g'] for r in resultados_exitosos)
-            total_volumen_ml = sum(r['resultados']['total_ml'] for r in resultados_exitosos)
-            total_area_m2 = sum(r['resultados']['area_m2'] for r in resultados_exitosos)
-            consumo_promedio_g_m2 = sum(r['resultados']['total_g_m2'] for r in resultados_exitosos) / len(resultados_exitosos)
-            
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Archivos exitosos", len(resultados_exitosos))
-            with col2:
-                st.metric("Consumo Total", f"{total_consumo_g:.2f} g")
-            with col3:
-                st.metric("Volumen Total", f"{total_volumen_ml:.2f} ml")
-            with col4:
-                st.metric("Área Total", f"{total_area_m2:.4f} m²")
-            
-            st.metric("Consumo Promedio por m²", f"{consumo_promedio_g_m2:.2f} g/m²")
+        st.metric("Consumo Promedio por m²", f"{consumo_promedio_g_m2:.2f} g/m²")
 
     # =============================================================================
     # INTERFAZ STREAMLIT - ACTUALIZADA CON MEJORAS
@@ -1218,7 +1237,7 @@ class CMYKRGConverterSimple:
                                     st.success(f"✅ {uploaded_file.name} procesado correctamente! Ve a la pestaña 'Resultados'")
                                 else:
                                     st.error(f"❌ Error procesando {uploaded_file.name}")
-                        
+    
             except ValueError as e:
                 st.error(f"❌ Error procesando imagen: {str(e)}")
                 self.agregar_log_procesamiento(uploaded_file, resolucion, None, exito=False, error_msg=str(e))
