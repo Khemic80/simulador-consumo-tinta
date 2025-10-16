@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageResampling
 import joblib
 import glob
 import os
@@ -35,6 +35,8 @@ def inicializar_sesion():
         st.session_state.tipo_usuario = None
     if 'ultimos_resultados' not in st.session_state:
         st.session_state.ultimos_resultados = None
+    if 'resultados_lote' not in st.session_state:
+        st.session_state.resultados_lote = []
     if 'historial_procesamientos' not in st.session_state:
         st.session_state.historial_procesamientos = []
     if 'estadisticas_uso' not in st.session_state:
@@ -664,9 +666,9 @@ class CMYKRGConverterSimple:
         """Interfaz para procesar múltiples imágenes con restricciones por tipo de usuario"""
         
         if st.session_state.tipo_usuario == "tecnico":
-            st.header("📁 Procesamiento Múltiple - MODO TÉCNICO")
+            st.header("📦 Procesamiento Múltiple - MODO TÉCNICO")
         else:
-            st.header("📁 Procesamiento Múltiple")
+            st.header("📦 Procesamiento Múltiple")
         
         # Upload múltiple
         uploaded_files = st.file_uploader(
@@ -690,22 +692,40 @@ class CMYKRGConverterSimple:
             # Mostrar info diferente según tipo de usuario
             if st.session_state.tipo_usuario == "tecnico":
                 st.subheader(f"📋 Archivos a procesar ({len(uploaded_files)} imágenes)")
-                # Lista detallada para técnicos
+                # Lista detallada para técnicos con miniaturas
                 for i, file in enumerate(uploaded_files):
-                    col1, col2, col3 = st.columns([3, 1, 1])
+                    col1, col2, col3, col4 = st.columns([1, 3, 1, 1])
                     with col1:
-                        st.write(f"**{i+1}. {file.name}** ({file.size:,} bytes)")
-                    with col2:
-                        st.write("⏳ En espera")
-                    with col3:
-                        if st.button(f"👁️ Vista", key=f"view_{i}"):
+                        # Mostrar miniatura
+                        try:
                             image = Image.open(file)
-                            st.image(image, caption=file.name, width=200)
+                            image.thumbnail((80, 80))
+                            st.image(image, use_column_width=True)
+                        except:
+                            st.write("🖼️")
+                    with col2:
+                        st.write(f"**{file.name}**")
+                        st.write(f"`{file.size:,} bytes`")
+                    with col3:
+                        st.write("⏳ En espera")
+                    with col4:
+                        if st.button(f"👁️", key=f"view_{i}", help="Vista previa"):
+                            image = Image.open(file)
+                            st.image(image, caption=file.name, width=300)
             else:
-                # Lista simplificada para usuarios normales
+                # Lista simplificada para usuarios normales con miniaturas
                 st.subheader(f"Archivos seleccionados: {len(uploaded_files)}")
-                archivos_lista = [f"• {file.name}" for file in uploaded_files]
-                st.write("\n".join(archivos_lista[:5]))  # Mostrar solo primeros 5
+                for i, file in enumerate(uploaded_files[:5]):  # Mostrar solo primeros 5 con miniaturas
+                    col1, col2 = st.columns([1, 4])
+                    with col1:
+                        try:
+                            image = Image.open(file)
+                            image.thumbnail((60, 60))
+                            st.image(image, use_column_width=True)
+                        except:
+                            st.write("🖼️")
+                    with col2:
+                        st.write(f"**{file.name}**")
                 if len(uploaded_files) > 5:
                     st.info(f"... y {len(uploaded_files) - 5} archivos más")
             
@@ -759,6 +779,9 @@ class CMYKRGConverterSimple:
         barra_progreso.progress(1.0)
         texto_estado.text("Procesamiento completado!")
         
+        # Guardar resultados en session state
+        st.session_state.resultados_lote = resultados_lote
+        
         # Mostrar resumen consolidado
         self.mostrar_resumen_lote(resultados_lote)
 
@@ -789,6 +812,7 @@ class CMYKRGConverterSimple:
                         'Estado': resultado['estado'],
                         'Consumo (g/m²)': f"{resultado['resultados']['total_g_m2']:.2f}",
                         'Consumo Total (g)': f"{resultado['resultados']['total_g']:.2f}",
+                        'Volumen Total (ml)': f"{resultado['resultados']['total_ml']:.2f}",
                         'Área (m²)': f"{resultado['resultados']['area_m2']:.4f}",
                         'Dimensiones': resultado['resultados']['dimensiones']
                     })
@@ -797,7 +821,9 @@ class CMYKRGConverterSimple:
                     datos_resumen.append({
                         'Archivo': resultado['archivo'],
                         'Estado': resultado['estado'],
+                        'Consumo (g/m²)': f"{resultado['resultados']['total_g_m2']:.2f}",
                         'Consumo Total (g)': f"{resultado['resultados']['total_g']:.2f}",
+                        'Volumen Total (ml)': f"{resultado['resultados']['total_ml']:.2f}",
                         'Área (m²)': f"{resultado['resultados']['area_m2']:.4f}"
                     })
             else:
@@ -807,6 +833,7 @@ class CMYKRGConverterSimple:
                         'Estado': resultado['estado'],
                         'Consumo (g/m²)': 'N/A',
                         'Consumo Total (g)': 'N/A',
+                        'Volumen Total (ml)': 'N/A',
                         'Área (m²)': 'N/A',
                         'Dimensiones': 'N/A'
                     })
@@ -814,7 +841,9 @@ class CMYKRGConverterSimple:
                     datos_resumen.append({
                         'Archivo': resultado['archivo'],
                         'Estado': resultado['estado'],
+                        'Consumo (g/m²)': 'N/A',
                         'Consumo Total (g)': 'N/A',
+                        'Volumen Total (ml)': 'N/A',
                         'Área (m²)': 'N/A'
                     })
         
@@ -874,7 +903,9 @@ class CMYKRGConverterSimple:
                     datos_csv.append({
                         'archivo': resultado['archivo'],
                         'estado': resultado['estado'],
+                        'consumo_g_m2': resultado['resultados']['total_g_m2'],
                         'consumo_total_g': resultado['resultados']['total_g'],
+                        'volumen_total_ml': resultado['resultados']['total_ml'],
                         'area_m2': resultado['resultados']['area_m2'],
                         'dimensiones': resultado['resultados']['dimensiones']
                     })
@@ -895,7 +926,9 @@ class CMYKRGConverterSimple:
                     datos_csv.append({
                         'archivo': resultado['archivo'],
                         'estado': resultado['estado'],
+                        'consumo_g_m2': None,
                         'consumo_total_g': None,
+                        'volumen_total_ml': None,
                         'area_m2': None,
                         'dimensiones': None
                     })
@@ -915,6 +948,71 @@ class CMYKRGConverterSimple:
             mime="text/csv",
             width='stretch'
         )
+
+    def mostrar_resultados_tabla(self):
+        """Mostrar tabla de resultados para procesamiento múltiple"""
+        st.header("📋 Tabla de Resultados")
+        
+        if not st.session_state.resultados_lote:
+            st.info("ℹ️ No hay resultados de procesamiento múltiple. Ve a la pestaña '📦 Procesamiento Múltiple' para procesar archivos.")
+            return
+        
+        # Crear tabla de resultados
+        datos_tabla = []
+        for resultado in st.session_state.resultados_lote:
+            if resultado['resultados']:
+                datos_tabla.append({
+                    'Archivo': resultado['archivo'],
+                    'Estado': resultado['estado'],
+                    'Consumo (g/m²)': resultado['resultados']['total_g_m2'],
+                    'Consumo Total (g)': resultado['resultados']['total_g'],
+                    'Volumen Total (ml)': resultado['resultados']['total_ml'],
+                    'Área (m²)': resultado['resultados']['area_m2']
+                })
+            else:
+                datos_tabla.append({
+                    'Archivo': resultado['archivo'],
+                    'Estado': resultado['estado'],
+                    'Consumo (g/m²)': None,
+                    'Consumo Total (g)': None,
+                    'Volumen Total (ml)': None,
+                    'Área (m²)': None
+                })
+        
+        # Mostrar tabla
+        df_resultados = pd.DataFrame(datos_tabla)
+        
+        # Formatear números en la tabla
+        styled_df = df_resultados.style.format({
+            'Consumo (g/m²)': '{:.2f}',
+            'Consumo Total (g)': '{:.2f}',
+            'Volumen Total (ml)': '{:.2f}',
+            'Área (m²)': '{:.4f}'
+        }, na_rep="N/A")
+        
+        st.dataframe(styled_df, width='stretch')
+        
+        # Métricas resumen
+        resultados_exitosos = [r for r in st.session_state.resultados_lote if r['resultados']]
+        if resultados_exitosos:
+            st.subheader("📊 Resumen General")
+            
+            total_consumo_g = sum(r['resultados']['total_g'] for r in resultados_exitosos)
+            total_volumen_ml = sum(r['resultados']['total_ml'] for r in resultados_exitosos)
+            total_area_m2 = sum(r['resultados']['area_m2'] for r in resultados_exitosos)
+            consumo_promedio_g_m2 = sum(r['resultados']['total_g_m2'] for r in resultados_exitosos) / len(resultados_exitosos)
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Archivos exitosos", len(resultados_exitosos))
+            with col2:
+                st.metric("Consumo Total", f"{total_consumo_g:.2f} g")
+            with col3:
+                st.metric("Volumen Total", f"{total_volumen_ml:.2f} ml")
+            with col4:
+                st.metric("Área Total", f"{total_area_m2:.4f} m²")
+            
+            st.metric("Consumo Promedio por m²", f"{consumo_promedio_g_m2:.2f} g/m²")
 
     # =============================================================================
     # INTERFAZ STREAMLIT - ACTUALIZADA CON PROCESAMIENTO MÚLTIPLE
@@ -948,23 +1046,24 @@ class CMYKRGConverterSimple:
         
         # Pestañas diferentes según tipo de usuario
         if st.session_state.tipo_usuario == "tecnico":
-            tab1, tab2, tab3, tab4 = st.tabs(["⚙️ Configuración", "📁 Individual", "📊 Lote", "📋 Historial"])
+            tab1, tab2, tab3, tab4, tab5 = st.tabs(["⚙️ Configuración", "📁 Individual", "📦 Múltiple", "📋 Resultados", "📊 Historial"])
         else:
-            tab1, tab2 = st.tabs(["📁 Individual", "📊 Procesamiento Múltiple"])
+            tab1, tab2, tab3 = st.tabs(["📁 Individual", "📦 Múltiple", "📋 Resultados"])
         
         with tab1:
             self.mostrar_configuracion()
         
+        with tab2:
+            self.mostrar_procesamiento_multiple()
+            
+        with tab3:
+            self.mostrar_resultados_tabla()
+        
         if st.session_state.tipo_usuario == "tecnico":
-            with tab2:
-                self.mostrar_procesamiento_multiple()
-            with tab3:
-                self.mostrar_resultados()
             with tab4:
+                self.mostrar_resultados_individuales()
+            with tab5:
                 self.mostrar_historial_procesamientos()
-        else:
-            with tab2:
-                self.mostrar_procesamiento_multiple()
 
     def mostrar_configuracion(self):
         """Pestaña de configuración individual"""
@@ -1014,7 +1113,7 @@ class CMYKRGConverterSimple:
                     col_img, col_info = st.columns([1, 1])
                 
                 with col_img:
-                    st.image(image, caption="Vista previa", width='stretch')
+                    st.image(image, caption="Vista previa", width=300)
                 
                 with col_info:
                     if st.session_state.tipo_usuario == "tecnico":
@@ -1112,12 +1211,16 @@ class CMYKRGConverterSimple:
                     st.write(f"**Modelo actual:** {self.modelo_actual is not None}")
                     st.write(f"**Archivos en sesión:** {len(st.session_state.historial_procesamientos)}")
 
-    def mostrar_resultados(self):
-        """Mostrar resultados del cálculo individual"""
-        st.header("📊 Resultados del Consumo")
+    def mostrar_resultados_individuales(self):
+        """Mostrar resultados del cálculo individual - SOLO PARA TÉCNICOS"""
+        if st.session_state.tipo_usuario != "tecnico":
+            st.info("🔒 Esta función solo está disponible para usuarios técnicos")
+            return
+            
+        st.header("📊 Resultados del Consumo Individual")
         
         if st.session_state.ultimos_resultados is None:
-            st.info("ℹ️ Ejecuta un cálculo en la pestaña anterior para ver resultados aquí")
+            st.info("ℹ️ Ejecuta un cálculo en la pestaña 'Configuración' para ver resultados aquí")
             return
         
         resultados = st.session_state.ultimos_resultados
@@ -1126,7 +1229,7 @@ class CMYKRGConverterSimple:
             st.error("❌ No hay resultados válidos para mostrar")
             return
         
-        # Métricas principales (comunes para ambos)
+        # Métricas principales
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
@@ -1157,25 +1260,24 @@ class CMYKRGConverterSimple:
         st.info(f"📁 **Archivo procesado:** {resultados.get('archivo_procesado', 'N/A')}")
         
         # Información detallada SOLO para técnicos
-        if st.session_state.tipo_usuario == "tecnico":
-            with st.expander("📋 Detalles del Análisis", expanded=True):
-                col_det1, col_det2 = st.columns(2)
-                
-                with col_det1:
-                    st.write("**Configuración:**")
-                    st.write(f"- Resolución: {resultados['resolucion']}")
-                    st.write(f"- DPI real detectado: {resultados.get('dpi_real', 'N/A')}")
-                    st.write(f"- Dimensiones: {resultados['dimensiones']}")
-                    st.write(f"- Método: Estimación CMYK Doble + RG Simple")
-                
-                with col_det2:
-                    st.write("**Especificaciones:**")
-                    st.write(f"- Densidad tinta: {densidad_tinta} g/ml")
-                    st.write(f"- Resolución X fija: {resolucion_x} DPI")
-                    st.write(f"- Configuración: GS4 5-10-15pl")
+        with st.expander("📋 Detalles del Análisis", expanded=True):
+            col_det1, col_det2 = st.columns(2)
+            
+            with col_det1:
+                st.write("**Configuración:**")
+                st.write(f"- Resolución: {resultados['resolucion']}")
+                st.write(f"- DPI real detectado: {resultados.get('dpi_real', 'N/A')}")
+                st.write(f"- Dimensiones: {resultados['dimensiones']}")
+                st.write(f"- Método: Estimación CMYK Doble + RG Simple")
+            
+            with col_det2:
+                st.write("**Especificaciones:**")
+                st.write(f"- Densidad tinta: {densidad_tinta} g/ml")
+                st.write(f"- Resolución X fija: {resolucion_x} DPI")
+                st.write(f"- Configuración: GS4 5-10-15pl")
         
         # Consumo por tinta SOLO para técnicos
-        if st.session_state.tipo_usuario == "tecnico" and 'consumos_detallados' in resultados:
+        if 'consumos_detallados' in resultados:
             st.subheader("🎨 Consumo Detallado por Tinta")
             
             tintas_data = []
