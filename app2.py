@@ -19,7 +19,7 @@ Image.MAX_IMAGE_PIXELS = 1000000000  # 1 billón de píxeles (ORIGINAL)
 # Configuración fija (ORIGINAL)
 max_pixels = 2000000  # 2 millones (ORIGINAL)
 resolucion_x = 600  # Fijo
-densidad_tinta = 1.05  # g/ml
+densidad_tinta = 1.10  # g/ml
 
 # =============================================================================
 # SISTEMA DE AUTENTICACIÓN
@@ -457,7 +457,7 @@ class CMYKRGConverterSimple:
             if st.session_state.tipo_usuario == "tecnico":
                 st.info("🔍 Iniciando cálculo de consumo físico (MÉTODO v0.9)...")
             
-            densidad_tinta = 1.05
+            densidad_tinta = 1.10
             dpi_x = float(resolucion_x)
             dpi_y = float(resolucion_y)
             
@@ -492,8 +492,8 @@ class CMYKRGConverterSimple:
                 st.info(f"🎨 Coberturas promedio: {coberturas}")
             
             factores_cabezal = {
-                'Cian': 2.0, 'Magenta': 2.0, 'Amarillo': 2.0,
-                'Negro': 2.0, 'Rojo': 1.0, 'Verde': 1.0
+                'Cian': 2.2, 'Magenta': 2.2, 'Amarillo': 2.2,
+                'Negro': 2.2, 'Rojo': 1.1, 'Verde': 1.1
             }
             
             canales = ['Cian', 'Magenta', 'Amarillo', 'Negro', 'Rojo', 'Verde']
