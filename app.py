@@ -19,7 +19,7 @@ Image.MAX_IMAGE_PIXELS = 1000000000  # 1 billón de píxeles (ORIGINAL)
 # Configuración fija (ORIGINAL)
 max_pixels = 2000000  # 2 millones (ORIGINAL)
 resolucion_x = 600  # Fijo
-densidad_tinta = 1.05  # g/ml
+densidad_tinta = 1.10  # g/ml
 
 # =============================================================================
 # SISTEMA DE AUTENTICACIÓN
@@ -455,7 +455,7 @@ class CMYKRGConverterSimple:
             if st.session_state.tipo_usuario == "tecnico":
                 st.info(f"🔢 Puntos por m²: {puntos_por_m2:,.0f}")
             
-            vol_por_punto_ml = 15e-9
+            vol_por_punto_ml = 19e-9
             vol_max_ml_m2 = puntos_por_m2 * vol_por_punto_ml
             
             if st.session_state.tipo_usuario == "tecnico":
