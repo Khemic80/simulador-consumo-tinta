@@ -455,7 +455,7 @@ class CMYKRGConverterSimple:
             if st.session_state.tipo_usuario == "tecnico":
                 st.info(f"🔢 Puntos por m²: {puntos_por_m2:,.0f}")
             
-            vol_por_punto_ml = 19e-9
+            vol_por_punto_ml = 21e-9
             vol_max_ml_m2 = puntos_por_m2 * vol_por_punto_ml
             
             if st.session_state.tipo_usuario == "tecnico":
