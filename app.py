@@ -467,8 +467,8 @@ class CMYKRGConverterSimple:
                 st.info(f"🎨 Coberturas promedio: {coberturas}")
             
             factores_cabezal = {
-                'Cian': 2.2, 'Magenta': 2.2, 'Amarillo': 2.2,
-                'Negro': 2.2, 'Rojo': 1.1, 'Verde': 1.1
+                'Cian': 2.25, 'Magenta': 2.25, 'Amarillo': 2.25,
+                'Negro': 2.25, 'Rojo': 1.15, 'Verde': 1.15
             }
             
             canales = ['Cian', 'Magenta', 'Amarillo', 'Negro', 'Rojo', 'Verde']
