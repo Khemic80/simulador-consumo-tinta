@@ -20,7 +20,7 @@ import json
 
 class StreamlitAnalytics:
     def __init__(self):
-        self.webhook_url = st.secrets.get("https://script.google.com/macros/s/AKfycbxls4kLESKqFUClkN8rLYav9wQF7JNU43Z8WagGHkUznFEjHJpKcMxCOzYGIQ65X23MkQ/exec", "")
+        self.webhook_url = st.secrets.get("https://script.google.com/macros/s/AKfycbyBzBq_nUALv9S5sBuIzMem33j3l9z8SLMDE0sXsP8yu6vtWRQQ6JKDZycQhN6Ctn5m/exec", "")
         self.enabled = bool(self.webhook_url)
     
     def track_event(self, event_type, **metadata):
