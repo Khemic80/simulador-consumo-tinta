@@ -1,10 +1,11 @@
+import os
+os.environ["STREAMLIT_SERVER_FILE_WATCHER"] = "false"
 import streamlit as st
 import pandas as pd
 import numpy as np
 from PIL import Image
 import joblib
 import glob
-import os
 import sys
 import time
 from io import BytesIO
