@@ -19,7 +19,7 @@ import json
 
 class StreamlitAnalytics:
     def __init__(self):
-        self.webhook_url = st.secrets.get("GOOGLE_SCRIPT_URL", "")
+        self.webhook_url = st.secrets.get("https://script.google.com/macros/s/AKfycbxls4kLESKqFUClkN8rLYav9wQF7JNU43Z8WagGHkUznFEjHJpKcMxCOzYGIQ65X23MkQ/exec", "")
         self.enabled = bool(self.webhook_url)
     
     def track_event(self, event_type, **metadata):
