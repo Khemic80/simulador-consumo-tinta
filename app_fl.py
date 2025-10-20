@@ -490,6 +490,10 @@ class CMYKRGConverterSimple:
             
             cmykrg_predictions = np.vstack(batch_predictions)
             cmykrg_predictions = np.clip(cmykrg_predictions, 0, 100)
+            # FILTRO BÁSICO DE BLANCOS (añadir esta línea)
+            img_flat = img_optimized.reshape(-1, 3)
+            blancos_mask = np.all(img_flat == [255, 255, 255], axis=1)
+            cmykrg_predictions[blancos_mask] = 0
             
             # ✅ APLICAR DITHERING A LAS PREDICCIONES
             status_text.text("Aplicando optimización (dithering)...")
