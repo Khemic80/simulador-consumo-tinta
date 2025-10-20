@@ -133,7 +133,7 @@ def mostrar_login():
     st.info("💡 **Nota:** Esta aplicación es de acceso restringido. Contacta al administrador para obtener credenciales.")
 
 # =============================================================================
-# CLASE PRINCIPAL - VERSIÓN COMPLETA CORREGIDA
+# CLASE PRINCIPAL - VERSIÓN COMPLETA CORREGIDA QUE SÍ USA EL MODELO
 # =============================================================================
 
 class CMYKRGConverterCompleto:
@@ -151,14 +151,6 @@ class CMYKRGConverterCompleto:
             'mediana': 12.6,   # pl - cobertura media
             'grande': 18.9     # pl - áreas sólidas
         }
-        
-        # Umbrales para seleccionar tamaño de gota por cobertura local
-        self.umbral_pequena = 0.15   # < 15% -> gota pequeña
-        self.umbral_mediana = 0.40   # 15-40% -> gota mediana
-        self.umbral_grande = 0.40    # > 40% -> gota grande
-        
-        # Tamaño de ventana para análisis local
-        self.ventana_size = 8
         
         if getattr(sys, 'frozen', False):
             self.script_dir = os.path.dirname(sys.executable)
@@ -447,150 +439,121 @@ class CMYKRGConverterCompleto:
         return np.clip(img, 0, 100)
 
     # =============================================================================
-    # MÉTODOS DE MÚLTIPLES TAMAÑOS DE GOTA - CORREGIDOS
+    # MÉTODO PRINCIPAL CORREGIDO - QUE SÍ USA EL MODELO COMPLETAMENTE
     # =============================================================================
     
-    def aplicar_tamanos_gota_adaptativos(self, cmykrg_predictions, img_shape):
-        """Aplicar diferentes tamaños de gota - CORREGIDO"""
-        height, width = img_shape[:2]
-        canales = cmykrg_predictions.shape[1]
+    def calcular_consumo_con_modelo_completo(self, cmykrg_predictions, img_shape, resolucion_y, image, filename):
+        """VERSIÓN CORREGIDA - usa TODAS las predicciones del modelo por canal"""
         
-        # Reformatear a imagen 2D
-        predicciones_2d = cmykrg_predictions.reshape(height, width, canales)
-        volumen_total_ml = np.zeros(canales)
-        conteo_gotas = np.zeros((canales, 3))  # pequeño, mediano, grande
+        # 1. CALCULAR PUNTOS DE IMPRESIÓN POR m² (basado en resolución de impresión)
+        dpi_x = float(resolucion_x)  # 600 DPI
+        dpi_y = float(resolucion_y)  # 600 DPI
+        puntos_por_pulgada2 = dpi_x * dpi_y  # 360,000 puntos/pulgada²
+        puntos_por_m2 = puntos_por_pulgada2 * (10000 / (2.54 * 2.54))  # ≈ 55,700,000 puntos/m²
         
-        total_bloques = ((height + self.ventana_size - 1) // self.ventana_size) * ((width + self.ventana_size - 1) // self.ventana_size)
-        bloques_procesados = 0
-        
-        for canal in range(canales):
-            canal_data = predicciones_2d[:, :, canal]
-            
-            for y in range(0, height, self.ventana_size):
-                for x in range(0, width, self.ventana_size):
-                    y_end = min(y + self.ventana_size, height)
-                    x_end = min(x + self.ventana_size, width)
-                    
-                    bloque = canal_data[y:y_end, x:x_end]
-                    if bloque.size == 0:
-                        continue
-                    
-                    # Calcular cobertura promedio del bloque
-                    cobertura_promedio = np.mean(bloque) / 100.0
-                    
-                    # Contar píxeles con cobertura significativa en este bloque
-                    pixeles_significativos = bloque[bloque > 5]  # > 5% de cobertura
-                    if len(pixeles_significativos) == 0:
-                        continue
-                    
-                    # Seleccionar tamaño de gota para este bloque
-                    if cobertura_promedio < self.umbral_pequena:
-                        tamano = 'pequena'
-                        idx = 0
-                    elif cobertura_promedio < self.umbral_mediana:
-                        tamano = 'mediana' 
-                        idx = 1
-                    else:
-                        tamano = 'grande'
-                        idx = 2
-                    
-                    # ✅ CORRECCIÓN: Cálculo de volumen FIXED
-                    volumen_gota_pl = self.tamanos_gota[tamano]
-                    
-                    # Cada píxel significativo recibe UNA gota del tamaño seleccionado
-                    num_puntos = len(pixeles_significativos)
-                    volumen_bloque_pl = num_puntos * volumen_gota_pl  # picolitros totales
-                    volumen_bloque_ml = volumen_bloque_pl * 1e-9      # convertir a mililitros
-                    
-                    volumen_total_ml[canal] += volumen_bloque_ml
-                    conteo_gotas[canal, idx] += num_puntos
-                    
-                    bloques_procesados += 1
-    
         if st.session_state.tipo_usuario == "tecnico":
-            st.info(f"🔍 Procesados {bloques_procesados} bloques de {self.ventana_size}x{self.ventana_size} píxeles")
-            st.info(f"💧 Volumen total base (sin factores): {np.sum(volumen_total_ml):.6f} ml")
-    
-        return volumen_total_ml, conteo_gotas
-
-    def calcular_consumo_con_gotas_adaptativas(self, cmykrg_predictions, img_shape, resolucion_y, image, filename):
-        """Calcular consumo - CORREGIDO con cálculo de volumen apropiado"""
+            st.info(f"🎯 Puntos por m²: {puntos_por_m2:,.0f}")
         
-        # PRIMERO: Aplicar filtro de blancos
-        img_array_original = np.array(image)
-        cmykrg_filtrado = self.aplicar_filtro_blancos_tolerancia(img_array_original, cmykrg_predictions.copy())
+        # 2. ✅ USAR LAS PREDICCIONES POR CANAL del modelo entrenado
+        canales = ['Cian', 'Magenta', 'Amarillo', 'Negro', 'Rojo', 'Verde']
+        factores_cabezal = [2.25, 2.25, 2.25, 2.25, 1.15, 1.15]  # ORIGINALES
         
-        # SEGUNDO: Aplicar dithering
-        cmykrg_optimizado = self.aplicar_dithering_floyd_steinberg(cmykrg_filtrado, img_shape)
+        # Calcular cobertura promedio POR CANAL (usando TODAS las predicciones del modelo)
+        coberturas_por_canal = np.mean(cmykrg_predictions / 100.0, axis=0)
         
-        # TERCERO: Calcular volúmenes con tamaños de gota adaptativos
-        volumen_total_ml, conteo_gotas = self.aplicar_tamanos_gota_adaptativos(cmykrg_optimizado, img_shape)
+        if st.session_state.tipo_usuario == "tecnico":
+            coberturas_info = [f"{canal}: {coberturas_por_canal[i]*100:.1f}%" for i, canal in enumerate(canales)]
+            st.info(f"🎨 Coberturas por canal: {', '.join(coberturas_info)}")
         
-        # CUARTO: Calcular área y factores
+        consumo_total_g_m2 = 0
+        consumo_total_ml = 0
+        consumos_detallados = {}
+        
+        for i, canal in enumerate(canales):
+            cobertura_canal = coberturas_por_canal[i]
+            factor_cabezal = factores_cabezal[i]
+            
+            # 3. CALCULAR PUNTOS A IMPRIMIR por m² para ESTE CANAL
+            puntos_a_imprimir_por_m2 = puntos_por_m2 * cobertura_canal
+            
+            # 4. DISTRIBUIR POR TAMAÑOS DE GOTA para este canal (basado en cobertura)
+            if cobertura_canal < 0.15:
+                # Baja cobertura: 80% pequeñas, 20% medianas
+                puntos_pequenos = puntos_a_imprimir_por_m2 * 0.8
+                puntos_medianos = puntos_a_imprimir_por_m2 * 0.2
+                puntos_grandes = 0
+            elif cobertura_canal < 0.40:
+                # Cobertura media: 40% pequeñas, 50% medianas, 10% grandes
+                puntos_pequenos = puntos_a_imprimir_por_m2 * 0.4
+                puntos_medianos = puntos_a_imprimir_por_m2 * 0.5
+                puntos_grandes = puntos_a_imprimir_por_m2 * 0.1
+            else:
+                # Alta cobertura: 20% pequeñas, 40% medianas, 40% grandes
+                puntos_pequenos = puntos_a_imprimir_por_m2 * 0.2
+                puntos_medianos = puntos_a_imprimir_por_m2 * 0.4
+                puntos_grandes = puntos_a_imprimir_por_m2 * 0.4
+            
+            # 5. CALCULAR VOLUMEN para este canal
+            volumen_pl_por_m2 = (puntos_pequenos * self.tamanos_gota['pequena'] + 
+                                puntos_medianos * self.tamanos_gota['mediana'] + 
+                                puntos_grandes * self.tamanos_gota['grande'])
+            volumen_ml_por_m2 = volumen_pl_por_m2 * 1e-9  # picolitros → mililitros
+            
+            # 6. APLICAR FACTOR DE CABEZAL específico
+            volumen_canal_ml_m2 = volumen_ml_por_m2 * factor_cabezal
+            masa_canal_g_m2 = volumen_canal_ml_m2 * densidad_tinta
+            
+            consumo_total_g_m2 += masa_canal_g_m2
+            
+            # Guardar detalles por canal
+            total_puntos_canal = puntos_pequenos + puntos_medianos + puntos_grandes
+            if total_puntos_canal > 0:
+                dist_pequena = (puntos_pequenos / total_puntos_canal) * 100
+                dist_mediana = (puntos_medianos / total_puntos_canal) * 100
+                dist_grande = (puntos_grandes / total_puntos_canal) * 100
+            else:
+                dist_pequena = dist_mediana = dist_grande = 0
+            
+            consumos_detallados[canal] = {
+                'cobertura_promedio': cobertura_canal * 100,
+                'puntos_por_m2': puntos_a_imprimir_por_m2,
+                'volumen_ml_m2': volumen_canal_ml_m2,
+                'masa_g_m2': masa_canal_g_m2,
+                'distribucion_gotas': f"P:{dist_pequena:.1f}%, M:{dist_mediana:.1f}%, G:{dist_grande:.1f}%",
+                'puntos_pequenos': int(puntos_pequenos),
+                'puntos_medianos': int(puntos_medianos),
+                'puntos_grandes': int(puntos_grandes),
+                'factor_cabezal': factor_cabezal
+            }
+        
+        # 7. CALCULAR PARA EL ÁREA ESPECÍFICA de esta imagen
         width_orig, height_orig = image.size
         dpi_real = self.detectar_dpi_real(image)
         ancho_cm = (width_orig / dpi_real) * 2.54
         alto_cm = (height_orig / dpi_real) * 2.54
         area_m2 = (ancho_cm * alto_cm) / 10000.0
-
-        # ✅ MANTENER FACTORES ORIGINALES
-        factores_cabezal = [2.25, 2.25, 2.25, 2.25, 1.15, 1.15]  # C,M,Y,K,R,G - ORIGINALES
-        canales = ['Cian', 'Magenta', 'Amarillo', 'Negro', 'Rojo', 'Verde']
         
-        # Calcular consumo final
-        densidad_tinta = 1.05
-        consumo_total_g = 0
-        consumo_total_g_m2 = 0
-        consumos_detallados = {}
-        
-        for i, canal in enumerate(canales):
-            # Aplicar factor de cabezal al volumen
-            volumen_canal_ml = volumen_total_ml[i] * factores_cabezal[i]
-            masa_canal_g = volumen_canal_ml * densidad_tinta
-            masa_canal_g_m2 = masa_canal_g / area_m2 if area_m2 > 0 else 0
-            
-            consumo_total_g += masa_canal_g
-            consumo_total_g_m2 += masa_canal_g_m2
-            
-            # Estadísticas de gotas
-            total_puntos = np.sum(conteo_gotas[i])
-            if total_puntos > 0:
-                dist_pequena = (conteo_gotas[i, 0] / total_puntos) * 100
-                dist_mediana = (conteo_gotas[i, 1] / total_puntos) * 100  
-                dist_grande = (conteo_gotas[i, 2] / total_puntos) * 100
-            else:
-                dist_pequena = dist_mediana = dist_grande = 0
-            
-            consumos_detallados[canal] = {
-                'volumen_ml': volumen_canal_ml,
-                'masa_g': masa_canal_g,
-                'masa_g_m2': masa_canal_g_m2,
-                'distribucion_gotas': f"P:{dist_pequena:.1f}%, M:{dist_mediana:.1f}%, G:{dist_grande:.1f}%",
-                'puntos_pequenos': int(conteo_gotas[i, 0]),
-                'puntos_medianos': int(conteo_gotas[i, 1]),
-                'puntos_grandes': int(conteo_gotas[i, 2]),
-                'factor_cabezal': factores_cabezal[i]
-            }
-        
+        consumo_total_g = consumo_total_g_m2 * area_m2
         consumo_total_ml = consumo_total_g / densidad_tinta
         
         if st.session_state.tipo_usuario == "tecnico":
             st.info(f"📊 Área calculada: {area_m2:.6f} m²")
             st.info(f"📈 Consumo total: {consumo_total_g_m2:.4f} g/m²")
-            st.info(f"🔢 Total puntos significativos: {np.sum(conteo_gotas):,}")
-    
+            st.info(f"🔢 Puntos totales por m²: {puntos_por_m2:,.0f}")
+        
         return {
             'total_g_m2': consumo_total_g_m2,
             'total_ml': consumo_total_ml,
             'total_g': consumo_total_g,
             'area_m2': area_m2,
-            'resolucion': f"{resolucion_x}x{resolucion_y} DPI",
+            'resolucion': f"{dpi_x}x{dpi_y} DPI",
             'consumos_detallados': consumos_detallados,
             'dimensiones': f"{ancho_cm:.1f}x{alto_cm:.1f} cm",
             'dpi_real': dpi_real,
             'archivo_procesado': filename,
-            'metodo': 'GOTAS_ADAPTATIVAS_CORREGIDO',
-            'tamanos_gota_utilizados': '6.3pl, 12.6pl, 18.9pl'
+            'metodo': 'MODELO_COMPLETO_CORREGIDO',
+            'tamanos_gota_utilizados': f"{self.tamanos_gota['pequena']}pl, {self.tamanos_gota['mediana']}pl, {self.tamanos_gota['grande']}pl",
+            'puntos_por_m2': puntos_por_m2
         }
 
     # =============================================================================
@@ -598,7 +561,7 @@ class CMYKRGConverterCompleto:
     # =============================================================================
     
     def procesar_imagen_completa(self, uploaded_file, resolucion_y, batch_size=10000):
-        """Procesamiento completo con múltiples tamaños de gota"""
+        """Procesamiento completo USANDO el modelo correctamente"""
         try:
             progress_bar = st.progress(0)
             status_text = st.empty()
@@ -622,7 +585,7 @@ class CMYKRGConverterCompleto:
             status_text.text("Procesando por lotes...")
             progress_bar.progress(25)
             
-            # Procesamiento por lotes
+            # Procesamiento por lotes para obtener predicciones del modelo
             height, width = img_optimized.shape[:2]
             total_pixels = height * width
             batch_predictions = []
@@ -651,12 +614,20 @@ class CMYKRGConverterCompleto:
             cmykrg_predictions = np.vstack(batch_predictions)
             cmykrg_predictions = np.clip(cmykrg_predictions, 0, 100)
             
-            # APLICAR NUEVO MÉTODO CON GOTAS ADAPTATIVAS
-            status_text.text("Calculando consumo con múltiples tamaños de gota...")
-            progress_bar.progress(85)
+            # ✅ APLICAR FILTROS (blancos + dithering) a las predicciones del modelo
+            status_text.text("Aplicando optimizaciones...")
+            progress_bar.progress(80)
             
-            resultados = self.calcular_consumo_con_gotas_adaptativas(
-                cmykrg_predictions, 
+            img_array_original = np.array(image)
+            cmykrg_filtrado = self.aplicar_filtro_blancos_tolerancia(img_array_original, cmykrg_predictions.copy())
+            cmykrg_optimizado = self.aplicar_dithering_floyd_steinberg(cmykrg_filtrado, img_optimized.shape)
+            
+            # ✅ USAR MÉTODO CORREGIDO QUE SÍ USA EL MODELO COMPLETAMENTE
+            status_text.text("Calculando consumo con modelo completo...")
+            progress_bar.progress(90)
+            
+            resultados = self.calcular_consumo_con_modelo_completo(
+                cmykrg_optimizado, 
                 img_optimized.shape, 
                 resolucion_y, 
                 image, 
@@ -801,17 +772,12 @@ class CMYKRGConverterCompleto:
         
         with col1:
             gota_pequena = st.number_input("Gota pequeña (pl)", value=6.3, min_value=1.0, max_value=50.0, step=0.1)
-            umbral_pequena = st.slider("Umbral pequeño (%)", 0, 30, 15, key="umbral_pequena_percent")
         
         with col2:
             gota_mediana = st.number_input("Gota mediana (pl)", value=12.6, min_value=1.0, max_value=50.0, step=0.1)
-            umbral_mediana = st.slider("Umbral mediano (%)", 10, 60, 40, key="umbral_mediana_percent")
         
         with col3:
             gota_grande = st.number_input("Gota grande (pl)", value=18.9, min_value=1.0, max_value=50.0, step=0.1)
-            umbral_grande = st.slider("Umbral grande (%)", 30, 100, 40, key="umbral_grande_percent")
-        
-        ventana_size = st.slider("Tamaño ventana análisis", 4, 16, 8, help="Tamaño del bloque para análisis local (píxeles)")
         
         # Actualizar configuración
         if st.button("💾 Aplicar Configuración de Gotas", key="aplicar_gotas"):
@@ -820,20 +786,16 @@ class CMYKRGConverterCompleto:
                 'mediana': gota_mediana,
                 'grande': gota_grande
             }
-            self.umbral_pequena = umbral_pequena / 100.0
-            self.umbral_mediana = umbral_mediana / 100.0
-            self.umbral_grande = umbral_grande / 100.0
-            self.ventana_size = ventana_size
             st.success("✅ Configuración de gotas aplicada")
             
         # Mostrar configuración actual
         st.info(f"**Configuración actual:** "
-                f"Pequeña: {self.tamanos_gota['pequena']}pl (<{self.umbral_pequena*100:.0f}%), "
-                f"Mediana: {self.tamanos_gota['mediana']}pl ({self.umbral_pequena*100:.0f}-{self.umbral_mediana*100:.0f}%), "
-                f"Grande: {self.tamanos_gota['grande']}pl (>{self.umbral_mediana*100:.0f}%)")
+                f"Pequeña: {self.tamanos_gota['pequena']}pl, "
+                f"Mediana: {self.tamanos_gota['mediana']}pl, "
+                f"Grande: {self.tamanos_gota['grande']}pl")
 
 # =============================================================================
-# INTERFAZ STREAMLIT - ACTUALIZADA CON MÚLTIPLES TAMAÑOS DE GOTA
+# INTERFAZ STREAMLIT - ACTUALIZADA
 # =============================================================================
 
     def mostrar_interfaz_principal(self):
@@ -981,8 +943,8 @@ class CMYKRGConverterCompleto:
                         if self.modelo_actual is None:
                             st.error("❌ No hay modelo cargado para la resolución seleccionada")
                         else:
-                            with st.spinner("Procesando imagen con múltiples tamaños de gota..."):
-                                # USAR LA VERSIÓN COMPLETA CON MÚLTIPLES TAMAÑOS DE GOTA
+                            with st.spinner("Procesando imagen con modelo completo..."):
+                                # USAR LA VERSIÓN COMPLETA CORREGIDA
                                 resultados = self.procesar_imagen_completa(
                                     uploaded_file, 
                                     resolucion, 
@@ -1072,7 +1034,7 @@ class CMYKRGConverterCompleto:
         
         # Información del archivo procesado
         st.info(f"📁 **Archivo procesado:** {resultados.get('archivo_procesado', 'N/A')}")
-        st.success(f"🔧 **Método:** {resultados.get('metodo', 'N/A')} - {resultados.get('tamanos_gota_utilizados', 'N/A')}")
+        st.success(f"🔧 **Método:** {resultados.get('metodo', 'N/A')}")
         
         # Información detallada SOLO para técnicos
         if st.session_state.tipo_usuario == "tecnico":
@@ -1086,12 +1048,14 @@ class CMYKRGConverterCompleto:
                     st.write(f"- Dimensiones: {resultados['dimensiones']}")
                     st.write(f"- Método: {resultados.get('metodo', 'N/A')}")
                     st.write(f"- Tamaños de gota: {resultados.get('tamanos_gota_utilizados', 'N/A')}")
+                    if 'puntos_por_m2' in resultados:
+                        st.write(f"- Puntos por m²: {resultados['puntos_por_m2']:,.0f}")
                 
                 with col_det2:
                     st.write("**Especificaciones:**")
                     st.write(f"- Densidad tinta: {densidad_tinta} g/ml")
                     st.write(f"- Resolución X fija: {resolucion_x} DPI")
-                    st.write(f"- Configuración: GS4 5-10-15pl")
+                    st.write(f"- Factores cabezal: CMYK:2.25, RG:1.15")
         
         # Consumo por tinta SOLO para técnicos
         if st.session_state.tipo_usuario == "tecnico" and 'consumos_detallados' in resultados:
@@ -1101,9 +1065,10 @@ class CMYKRGConverterCompleto:
             for tinta, datos in resultados['consumos_detallados'].items():
                 tintas_data.append({
                     'Tinta': tinta,
+                    'Cobertura (%)': f"{datos['cobertura_promedio']:.1f}%",
                     'Consumo (g/m²)': f"{datos['masa_g_m2']:.4f}",
-                    'Volumen (ml)': f"{datos['volumen_ml']:.4f}",
-                    'Masa (g)': f"{datos['masa_g']:.4f}",
+                    'Volumen (ml/m²)': f"{datos['volumen_ml_m2']:.6f}",
+                    'Puntos/m²': f"{datos['puntos_por_m2']:,.0f}",
                     'Distribución Gotas': datos['distribucion_gotas'],
                     'Factor Cabezal': datos['factor_cabezal']
                 })
@@ -1128,12 +1093,19 @@ class CMYKRGConverterCompleto:
             
             datos_gotas = []
             for tinta, datos in resultados['consumos_detallados'].items():
+                total_puntos = datos['puntos_pequenos'] + datos['puntos_medianos'] + datos['puntos_grandes']
+                if total_puntos > 0:
+                    porcentaje_pequenos = (datos['puntos_pequenos'] / total_puntos) * 100
+                    porcentaje_medianos = (datos['puntos_medianos'] / total_puntos) * 100
+                    porcentaje_grandes = (datos['puntos_grandes'] / total_puntos) * 100
+                else:
+                    porcentaje_pequenos = porcentaje_medianos = porcentaje_grandes = 0
+                    
                 datos_gotas.append({
                     'Tinta': tinta,
-                    'Gotas Pequeñas': datos['puntos_pequenos'],
-                    'Gotas Medianas': datos['puntos_medianos'], 
-                    'Gotas Grandes': datos['puntos_grandes'],
-                    'Distribución': datos['distribucion_gotas']
+                    'Gotas Pequeñas': f"{datos['puntos_pequenos']:,.0f} ({porcentaje_pequenos:.1f}%)",
+                    'Gotas Medianas': f"{datos['puntos_medianos']:,.0f} ({porcentaje_medianos:.1f}%)", 
+                    'Gotas Grandes': f"{datos['puntos_grandes']:,.0f} ({porcentaje_grandes:.1f}%)"
                 })
             
             df_gotas = pd.DataFrame(datos_gotas)
