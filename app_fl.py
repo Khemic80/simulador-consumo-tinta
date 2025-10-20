@@ -133,10 +133,10 @@ def mostrar_login():
     st.info("💡 **Nota:** Esta aplicación es de acceso restringido. Contacta al administrador para obtener credenciales.")
 
 # =============================================================================
-# CLASE PRINCIPAL - VERSIÓN CON DITHERING
+# CLASE PRINCIPAL - VERSIÓN COMPLETA CON MÚLTIPLES TAMAÑOS DE GOTA
 # =============================================================================
 
-class CMYKRGConverterSimple:
+class CMYKRGConverterCompleto:
     def __init__(self):
         self.modelo_600 = None
         self.modelo_1200 = None
@@ -144,6 +144,21 @@ class CMYKRGConverterSimple:
         self.scaler_1200 = None
         self.modelo_actual = None
         self.scaler_actual = None
+        
+        # CONFIGURACIÓN DE TAMAÑOS DE GOTA
+        self.tamanos_gota = {
+            'pequena': 6.3,    # pl - para detalles finos
+            'mediana': 12.6,   # pl - cobertura media
+            'grande': 18.9     # pl - áreas sólidas
+        }
+        
+        # Umbrales para seleccionar tamaño de gota por cobertura local
+        self.umbral_pequena = 0.15   # < 15% -> gota pequeña
+        self.umbral_mediana = 0.40   # 15-40% -> gota mediana
+        self.umbral_grande = 0.40    # > 40% -> gota grande
+        
+        # Tamaño de ventana para análisis local
+        self.ventana_size = 8
         
         if getattr(sys, 'frozen', False):
             self.script_dir = os.path.dirname(sys.executable)
@@ -355,6 +370,26 @@ class CMYKRGConverterSimple:
         return X_enhanced
 
     # =============================================================================
+    # MÉTODOS DE FILTRADO DE BLANCOS - NUEVOS
+    # =============================================================================
+    
+    def aplicar_filtro_blancos_tolerancia(self, img_array, cmykrg_predictions, tolerancia=5):
+        """Establecer cobertura 0% para píxeles casi blancos"""
+        img_flat = img_array.reshape(-1, 3)
+        
+        # Píxeles con todos los canales > (255 - tolerancia) se consideran blancos
+        blancos_mask = np.all(img_flat >= (255 - tolerancia), axis=1)
+        
+        # Para píxeles blancos, establecer todas las tintas a 0%
+        cmykrg_predictions[blancos_mask] = 0
+        
+        if st.session_state.tipo_usuario == "tecnico" and np.any(blancos_mask):
+            porcentaje_blancos = (np.sum(blancos_mask) / len(blancos_mask)) * 100
+            st.info(f"🎯 Píxeles casi-blancos detectados: {porcentaje_blancos:.1f}% -> Cobertura 0%")
+        
+        return cmykrg_predictions
+
+    # =============================================================================
     # MÉTODOS DE DITHERING - NUEVOS
     # =============================================================================
     
@@ -405,77 +440,188 @@ class CMYKRGConverterSimple:
                         img[y + 1, x + 1] += error * 1/16
         
         return np.clip(img, 0, 100)
+
+    # =============================================================================
+    # MÉTODOS DE MÚLTIPLES TAMAÑOS DE GOTA - NUEVOS
+    # =============================================================================
     
-    def aplicar_dithering_umbral_adaptativo(self, cmykrg_predictions, img_shape, umbral_global=40):
-        """Dithering con umbral adaptativo basado en cobertura general"""
+    def aplicar_tamanos_gota_adaptativos(self, cmykrg_predictions, img_shape):
+        """Aplicar diferentes tamaños de gota según cobertura local"""
         height, width = img_shape[:2]
         canales = cmykrg_predictions.shape[1]
         
-        # Calcular cobertura general de la imagen
-        cobertura_promedio = np.mean(cmykrg_predictions) / 100.0
-        
-        # Ajustar umbral según cobertura general
-        if cobertura_promedio < 0.10:  # Muy baja cobertura
-            umbral_adaptativo = 60  # Más restrictivo
-        elif cobertura_promedio < 0.20:  # Baja cobertura
-            umbral_adaptativo = 50
-        elif cobertura_promedio < 0.40:  # Cobertura media
-            umbral_adaptativo = 40
-        else:  # Alta cobertura
-            umbral_adaptativo = 30
-        
         # Reformatear a imagen 2D
         predicciones_2d = cmykrg_predictions.reshape(height, width, canales)
-        resultado = np.zeros_like(predicciones_2d)
+        volumen_total_ml = np.zeros(canales)
+        conteo_gotas = np.zeros((canales, 3))  # pequeño, mediano, grande
+        
+        total_bloques = ((height + self.ventana_size - 1) // self.ventana_size) * ((width + self.ventana_size - 1) // self.ventana_size)
+        bloques_procesados = 0
         
         for canal in range(canales):
-            canal_data = predicciones_2d[:, :, canal].astype(np.float32)
+            canal_data = predicciones_2d[:, :, canal]
             
-            # Aplicar filtro gaussiano para suavizar
-            canal_suavizado = scipy.ndimage.gaussian_filter(canal_data, sigma=0.7)
-            
-            # Aplicar umbral adaptativo
-            mascara = canal_suavizado >= umbral_adaptativo
-            canal_optimizado = np.zeros_like(canal_data)
-            canal_optimizado[mascara] = canal_data[mascara]  # Mantener valores originales
-            
-            resultado[:, :, canal] = canal_optimizado
+            for y in range(0, height, self.ventana_size):
+                for x in range(0, width, self.ventana_size):
+                    y_end = min(y + self.ventana_size, height)
+                    x_end = min(x + self.ventana_size, width)
+                    
+                    bloque = canal_data[y:y_end, x:x_end]
+                    if bloque.size == 0:
+                        continue
+                    
+                    # Calcular cobertura promedio del bloque
+                    cobertura_promedio = np.mean(bloque) / 100.0
+                    
+                    # Contar píxeles con cobertura significativa en este bloque
+                    pixeles_significativos = bloque[bloque > 5]  # > 5% de cobertura
+                    if len(pixeles_significativos) == 0:
+                        continue
+                    
+                    # Seleccionar tamaño de gota para este bloque
+                    if cobertura_promedio < self.umbral_pequena:
+                        tamano = 'pequena'
+                        idx = 0
+                    elif cobertura_promedio < self.umbral_mediana:
+                        tamano = 'mediana' 
+                        idx = 1
+                    else:
+                        tamano = 'grande'
+                        idx = 2
+                    
+                    # Calcular volumen para este bloque
+                    volumen_gota_pl = self.tamanos_gota[tamano]
+                    cobertura_total = np.sum(pixeles_significativos) / 100.0
+                    volumen_bloque_ml = (cobertura_total * volumen_gota_pl * 1e-9)  # pl -> ml
+                    
+                    volumen_total_ml[canal] += volumen_bloque_ml
+                    conteo_gotas[canal, idx] += len(pixeles_significativos)
+                    
+                    bloques_procesados += 1
         
-        return resultado.reshape(-1, canales)
+        if st.session_state.tipo_usuario == "tecnico":
+            st.info(f"🔍 Procesados {bloques_procesados} bloques de {self.ventana_size}x{self.ventana_size} píxeles")
+        
+        return volumen_total_ml, conteo_gotas
+
+    def calcular_consumo_con_gotas_adaptativas(self, cmykrg_predictions, img_shape, resolucion_y, image, filename):
+        """Calcular consumo usando múltiples tamaños de gota"""
+        
+        # PRIMERO: Aplicar filtro de blancos
+        img_array = np.array(image)
+        cmykrg_filtrado = self.aplicar_filtro_blancos_tolerancia(img_array, cmykrg_predictions.copy())
+        
+        # SEGUNDO: Aplicar dithering
+        cmykrg_optimizado = self.aplicar_dithering_floyd_steinberg(cmykrg_filtrado, img_shape)
+        
+        # TERCERO: Calcular volúmenes con tamaños de gota adaptativos
+        volumen_total_ml, conteo_gotas = self.aplicar_tamanos_gota_adaptativos(cmykrg_optimizado, img_shape)
+        
+        # CUARTO: Calcular área y factores
+        width_orig, height_orig = image.size
+        dpi_real = self.detectar_dpi_real(image)
+        ancho_cm = (width_orig / dpi_real) * 2.54
+        alto_cm = (height_orig / dpi_real) * 2.54
+        area_m2 = (ancho_cm * alto_cm) / 10000.0
+
+        # Factores de cabezal (MANTENER ORIGINALES)
+        factores_cabezal = [2.25, 2.25, 2.25, 2.25, 1.15, 1.15]  # C,M,Y,K,R,G
+        canales = ['Cian', 'Magenta', 'Amarillo', 'Negro', 'Rojo', 'Verde']
+        
+        # Calcular consumo final
+        densidad_tinta = 1.05
+        consumo_total_g = 0
+        consumo_total_g_m2 = 0
+        consumos_detallados = {}
+        
+        for i, canal in enumerate(canales):
+            # Aplicar factor de cabezal al volumen
+            volumen_canal_ml = volumen_total_ml[i] * factores_cabezal[i]
+            masa_canal_g = volumen_canal_ml * densidad_tinta
+            masa_canal_g_m2 = masa_canal_g / area_m2 if area_m2 > 0 else 0
+            
+            consumo_total_g += masa_canal_g
+            consumo_total_g_m2 += masa_canal_g_m2
+            
+            # Estadísticas de gotas
+            total_puntos = np.sum(conteo_gotas[i])
+            if total_puntos > 0:
+                dist_pequena = (conteo_gotas[i, 0] / total_puntos) * 100
+                dist_mediana = (conteo_gotas[i, 1] / total_puntos) * 100  
+                dist_grande = (conteo_gotas[i, 2] / total_puntos) * 100
+            else:
+                dist_pequena = dist_mediana = dist_grande = 0
+            
+            consumos_detallados[canal] = {
+                'volumen_ml': volumen_canal_ml,
+                'masa_g': masa_canal_g,
+                'masa_g_m2': masa_canal_g_m2,
+                'distribucion_gotas': f"P:{dist_pequena:.1f}%, M:{dist_mediana:.1f}%, G:{dist_grande:.1f}%",
+                'puntos_pequenos': int(conteo_gotas[i, 0]),
+                'puntos_medianos': int(conteo_gotas[i, 1]),
+                'puntos_grandes': int(conteo_gotas[i, 2]),
+                'factor_cabezal': factores_cabezal[i]
+            }
+        
+        consumo_total_ml = consumo_total_g / densidad_tinta
+        
+        return {
+            'total_g_m2': consumo_total_g_m2,
+            'total_ml': consumo_total_ml,
+            'total_g': consumo_total_g,
+            'area_m2': area_m2,
+            'resolucion': f"{resolucion_x}x{resolucion_y} DPI",
+            'consumos_detallados': consumos_detallados,
+            'dimensiones': f"{ancho_cm:.1f}x{alto_cm:.1f} cm",
+            'dpi_real': dpi_real,
+            'archivo_procesado': filename,
+            'metodo': 'GOTAS_ADAPTATIVAS',
+            'tamanos_gota_utilizados': '6.3pl, 12.6pl, 18.9pl'
+        }
+
+    # =============================================================================
+    # MÉTODOS DE PROCESAMIENTO PRINCIPAL - ACTUALIZADOS
+    # =============================================================================
     
-    def procesar_imagen_con_dithering(self, uploaded_file, resolucion_y, batch_size=10000, metodo_dithering='floyd_steinberg'):
-        """Procesar imagen aplicando dithering antes del cálculo final"""
+    def procesar_imagen_completa(self, uploaded_file, resolucion_y, batch_size=10000):
+        """Procesamiento completo con múltiples tamaños de gota"""
         try:
             progress_bar = st.progress(0)
             status_text = st.empty()
             
             status_text.text("Cargando imagen...")
-            progress_bar.progress(10)
+            progress_bar.progress(5)
             
             image = Image.open(uploaded_file)
             if image.mode != 'RGB':
                 image = image.convert('RGB')
             
             status_text.text("Optimizando imagen...")
-            progress_bar.progress(30)
+            progress_bar.progress(15)
             
             img_array = np.array(image)
             img_optimized, was_optimized = self.optimizar_imagen(img_array)
             
-            status_text.text("Procesando por lotes...")
-            progress_bar.progress(40)
+            if was_optimized and st.session_state.tipo_usuario == "tecnico":
+                st.warning("⚠️ Imagen optimizada por tamaño")
             
-            # Procesamiento por lotes (igual que antes)
+            status_text.text("Procesando por lotes...")
+            progress_bar.progress(25)
+            
+            # Procesamiento por lotes
             height, width = img_optimized.shape[:2]
             total_pixels = height * width
             batch_predictions = []
             num_batches = (total_pixels + batch_size - 1) // batch_size
             
+            if st.session_state.tipo_usuario == "tecnico":
+                st.info(f"🔧 Procesando {total_pixels:,} píxeles en {num_batches} lotes de {batch_size}")
+            
             for batch_idx in range(num_batches):
                 start_idx = batch_idx * batch_size
                 end_idx = min((batch_idx + 1) * batch_size, total_pixels)
                 
-                progress = 40 + (batch_idx / num_batches) * 30
+                progress = 25 + (batch_idx / num_batches) * 40
                 status_text.text(f"Procesando lote {batch_idx + 1}/{num_batches}...")
                 progress_bar.progress(int(progress))
                 
@@ -486,58 +632,38 @@ class CMYKRGConverterSimple:
                 batch_predictions.append(batch_pred)
             
             status_text.text("Combinando predicciones...")
-            progress_bar.progress(75)
+            progress_bar.progress(70)
             
             cmykrg_predictions = np.vstack(batch_predictions)
             cmykrg_predictions = np.clip(cmykrg_predictions, 0, 100)
-            # FILTRO BÁSICO DE BLANCOS (añadir esta línea)
-            img_flat = img_optimized.reshape(-1, 3)
-            blancos_mask = np.all(img_flat == [255, 255, 255], axis=1)
-            cmykrg_predictions[blancos_mask] = 0
             
-            # ✅ APLICAR DITHERING A LAS PREDICCIONES
-            status_text.text("Aplicando optimización (dithering)...")
+            # APLICAR NUEVO MÉTODO CON GOTAS ADAPTATIVAS
+            status_text.text("Calculando consumo con múltiples tamaños de gota...")
             progress_bar.progress(85)
             
-            if metodo_dithering == 'floyd_steinberg':
-                cmykrg_optimizado = self.aplicar_dithering_floyd_steinberg(cmykrg_predictions, img_optimized.shape)
-            elif metodo_dithering == 'umbral_adaptativo':
-                cmykrg_optimizado = self.aplicar_dithering_umbral_adaptativo(cmykrg_predictions, img_optimized.shape)
-            else:
-                cmykrg_optimizado = cmykrg_predictions  # Sin dithering
-            
-            # Calcular consumo con predicciones OPTIMIZADAS
-            status_text.text("Calculando consumo...")
-            progress_bar.progress(95)
-            
-            resultados = self.calcular_consumo_fisico_original(
-                cmykrg_optimizado,  # ← USAR PREDICCIONES CON DITHERING
+            resultados = self.calcular_consumo_con_gotas_adaptativas(
+                cmykrg_predictions, 
                 img_optimized.shape, 
-                resolucion_y,
-                image,
+                resolucion_y, 
+                image, 
                 uploaded_file.name
             )
-            
-            # Agregar métricas de optimización
-            if resultados:
-                cobertura_original = np.mean(cmykrg_predictions)
-                cobertura_optimizada = np.mean(cmykrg_optimizado)
-                reduccion = ((cobertura_original - cobertura_optimizada) / cobertura_original * 100) if cobertura_original > 0 else 0
-                
-                resultados['metodo_dithering'] = metodo_dithering
-                resultados['cobertura_original'] = f"{cobertura_original:.1f}%"
-                resultados['cobertura_optimizada'] = f"{cobertura_optimizada:.1f}%"
-                resultados['reduccion_cobertura'] = f"{reduccion:.1f}%"
             
             progress_bar.progress(100)
             status_text.text("Completado!")
             
             self.agregar_log_procesamiento(uploaded_file, resolucion_y, resultados, exito=True)
+            
             return resultados
             
         except Exception as e:
-            error_msg = f"Error en procesamiento con dithering: {str(e)}"
+            error_msg = f"Error en procesamiento completo: {str(e)}"
             st.error(f"❌ {error_msg}")
+            
+            if st.session_state.tipo_usuario == "tecnico":
+                import traceback
+                st.error(f"🔧 Detalles: {traceback.format_exc()}")
+                
             self.agregar_log_procesamiento(uploaded_file, resolucion_y, None, exito=False, error_msg=error_msg)
             return None
 
@@ -617,209 +743,6 @@ class CMYKRGConverterSimple:
         with col4:
             tasa_exito = (stats['archivos_exitosos'] / stats['total_archivos'] * 100) if stats['total_archivos'] > 0 else 0
             st.metric("Tasa de Éxito", f"{tasa_exito:.1f}%")
-    
-    def calcular_consumo_fisico_original(self, cmykrg_predictions, img_shape, resolucion_y, image, filename):
-        """Calcular consumo físico de tinta - VERSIÓN ORIGINAL EXACTA"""
-        try:
-            if st.session_state.tipo_usuario == "tecnico":
-                st.info("🔍 Iniciando cálculo de consumo físico (MÉTODO v0.9)...")
-            
-            densidad_tinta = 1.05
-            dpi_x = float(resolucion_x)
-            dpi_y = float(resolucion_y)
-            
-            width_orig, height_orig = image.size
-            dpi_real = self.detectar_dpi_real(image)
-            
-            ancho_cm = (width_orig / dpi_real) * 2.54
-            alto_cm = (height_orig / dpi_real) * 2.54
-            area_m2 = (ancho_cm * alto_cm) / 10000.0
-
-            if st.session_state.tipo_usuario == "tecnico":
-                st.info(f"📐 Archivo: {filename}")
-                st.info(f"📏 Dimensiones: {width_orig} x {height_orig} píxeles")
-                st.info(f"📐 Dimensiones físicas: {ancho_cm:.1f} x {alto_cm:.1f} cm")
-                st.info(f"📊 Área: {area_m2:.6f} m²")
-                st.info(f"🎯 DPI real: {dpi_real}, DPI impresión: {dpi_x}x{dpi_y}")
-            
-            puntos_por_m2 = (dpi_x / 2.54) * (dpi_y / 2.54) * 10000
-            
-            if st.session_state.tipo_usuario == "tecnico":
-                st.info(f"🔢 Puntos por m²: {puntos_por_m2:,.0f}")
-            
-            vol_por_punto_ml = 20e-9
-            vol_max_ml_m2 = puntos_por_m2 * vol_por_punto_ml
-            
-            if st.session_state.tipo_usuario == "tecnico":
-                st.info(f"💧 Volumen máximo por m²: {vol_max_ml_m2:.6f} ml")
-            
-            coberturas = np.mean(cmykrg_predictions / 100.0, axis=0)
-            
-            if st.session_state.tipo_usuario == "tecnico":
-                st.info(f"🎨 Coberturas promedio: {coberturas}")
-            
-            factores_cabezal = {
-                'Cian': 2.25, 'Magenta': 2.25, 'Amarillo': 2.25,
-                'Negro': 2.25, 'Rojo': 1.15, 'Verde': 1.15
-            }
-            
-            canales = ['Cian', 'Magenta', 'Amarillo', 'Negro', 'Rojo', 'Verde']
-            consumo_total_g_m2 = 0
-            consumos_detallados = {}
-            
-            for i, canal in enumerate(canales):
-                factor = factores_cabezal[canal]
-                cobertura = coberturas[i]
-                
-                vol_ml_m2 = cobertura * vol_max_ml_m2 * factor
-                masa_g_m2 = vol_ml_m2 * densidad_tinta
-                vol_ml_total = vol_ml_m2 * area_m2
-                masa_g_total = masa_g_m2 * area_m2
-                
-                consumo_total_g_m2 += masa_g_m2
-                
-                consumos_detallados[canal] = {
-                    'cobertura_promedio': cobertura * 100,
-                    'volumen_ml_m2': vol_ml_m2,
-                    'masa_g_m2': masa_g_m2,
-                    'ml_total': vol_ml_total,
-                    'g_total': masa_g_total,
-                    'factores_cabezal': factor
-                }
-                
-                if st.session_state.tipo_usuario == "tecnico":
-                    st.info(f"  {canal}: {cobertura*100:.1f}% -> {masa_g_m2:.4f} g/m²")
-
-            consumo_total_ml = consumo_total_g_m2 * area_m2 / densidad_tinta
-            consumo_total_g = consumo_total_g_m2 * area_m2
-            
-            if st.session_state.tipo_usuario == "tecnico":
-                st.success(f"✅ Consumo TOTAL: {consumo_total_g_m2:.4f} g/m²")
-            
-            return {
-                'total_g_m2': consumo_total_g_m2,
-                'total_ml': consumo_total_ml,
-                'total_g': consumo_total_g,
-                'area_m2': area_m2,
-                'resolucion': f"{dpi_x}x{dpi_y} DPI",
-                'consumos_detallados': consumos_detallados,
-                'dimensiones': f"{ancho_cm:.1f}x{alto_cm:.1f} cm",
-                'dpi_real': dpi_real,
-                'archivo_procesado': filename
-            }
-
-        except ValueError as e:
-            st.error(f"❌ Error en cálculo: {str(e)}")
-            self.agregar_log_procesamiento(image, resolucion_y, None, exito=False, error_msg=str(e))
-            return None
-        except Exception as e:
-            st.error(f"❌ ERROR en cálculo: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            self.agregar_log_procesamiento(image, resolucion_y, None, exito=False, error_msg=str(e))
-            return None
-
-    def procesar_imagen_por_lotes(self, uploaded_file, resolucion_y, batch_size=10000):
-        """Procesamiento por LOTES para evitar problemas de memoria - PERO RESULTADOS ORIGINALES"""
-        try:
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            status_text.text("Cargando imagen...")
-            progress_bar.progress(10)
-            
-            image = Image.open(uploaded_file)
-            
-            if image.mode != 'RGB':
-                image = image.convert('RGB')
-            
-            status_text.text("Optimizando imagen...")
-            progress_bar.progress(30)
-            
-            img_array = np.array(image)
-            img_optimized, was_optimized = self.optimizar_imagen(img_array)
-            
-            if was_optimized and st.session_state.tipo_usuario == "tecnico":
-                st.warning("⚠️ Imagen optimizada por tamaño")
-            
-            status_text.text("Preparando procesamiento por lotes...")
-            progress_bar.progress(40)
-            
-            # Obtener dimensiones
-            height, width = img_optimized.shape[:2]
-            total_pixels = height * width
-            
-            # Procesar por lotes
-            batch_predictions = []
-            num_batches = (total_pixels + batch_size - 1) // batch_size
-            
-            if st.session_state.tipo_usuario == "tecnico":
-                st.info(f"🔧 Procesando {total_pixels:,} píxeles en {num_batches} lotes de {batch_size}")
-            
-            for batch_idx in range(num_batches):
-                start_idx = batch_idx * batch_size
-                end_idx = min((batch_idx + 1) * batch_size, total_pixels)
-                
-                # Progreso
-                progress = 40 + (batch_idx / num_batches) * 50
-                status_text.text(f"Procesando lote {batch_idx + 1}/{num_batches}...")
-                progress_bar.progress(int(progress))
-                
-                # Extraer lote actual
-                batch_pixels = img_optimized.reshape(-1, 3)[start_idx:end_idx]
-                
-                # Aplicar ingeniería de características al lote (MISMO MÉTODO ORIGINAL)
-                batch_enhanced = self.aplicar_ingenieria_caracteristicas(batch_pixels)
-                
-                # Escalar y predecir
-                batch_scaled = self.scaler_actual.transform(batch_enhanced)
-                batch_pred = self.modelo_actual.predict(batch_scaled)
-                
-                batch_predictions.append(batch_pred)
-                
-                # Liberar memoria periódicamente
-                if batch_idx % 5 == 0:  # Cada 5 lotes
-                    import gc
-                    gc.collect()
-            
-            # Combinar todas las predicciones
-            status_text.text("Combinando resultados...")
-            progress_bar.progress(95)
-            
-            cmykrg_predictions = np.vstack(batch_predictions)
-            cmykrg_predictions = np.clip(cmykrg_predictions, 0, 100)
-            
-            # Calcular consumo (MISMO MÉTODO ORIGINAL)
-            resultados = self.calcular_consumo_fisico_original(
-                cmykrg_predictions, 
-                img_optimized.shape, 
-                resolucion_y,
-                image,
-                uploaded_file.name
-            )
-            
-            progress_bar.progress(100)
-            status_text.text("Completado!")
-            
-            self.agregar_log_procesamiento(uploaded_file, resolucion_y, resultados, exito=True)
-            
-            # Limpiar memoria
-            del img_array, img_optimized, batch_predictions, cmykrg_predictions
-            import gc
-            gc.collect()
-            
-            return resultados
-        
-        except Exception as e:
-            error_msg = f"Error en procesamiento por lotes: {str(e)}"
-            st.error(f"❌ {error_msg}")
-            
-            if st.session_state.tipo_usuario == "tecnico":
-                import traceback
-                st.error(f"🔧 Detalles: {traceback.format_exc()}")
-                
-            self.agregar_log_procesamiento(uploaded_file, resolucion_y, None, exito=False, error_msg=error_msg)
-            return None
 
     def cargar_modelo_manual(self, resolucion, uploaded_model):
         """Cargar un modelo manualmente - SOLO TÉCNICOS"""
@@ -848,8 +771,55 @@ class CMYKRGConverterSimple:
             except:
                 pass
 
+    # =============================================================================
+    # INTERFAZ CONFIGURACIÓN GOTAS - NUEVO
+    # =============================================================================
+    
+    def mostrar_configuracion_gotas(self):
+        """Interfaz para configurar tamaños de gota (solo técnicos)"""
+        if st.session_state.tipo_usuario != "tecnico":
+            return
+        
+        st.markdown("---")
+        st.subheader("💧 Configuración de Tamaños de Gota")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            gota_pequena = st.number_input("Gota pequeña (pl)", value=6.3, min_value=1.0, max_value=50.0, step=0.1)
+            umbral_pequena = st.slider("Umbral pequeño (%)", 0, 30, 15, key="umbral_pequena_percent")
+        
+        with col2:
+            gota_mediana = st.number_input("Gota mediana (pl)", value=12.6, min_value=1.0, max_value=50.0, step=0.1)
+            umbral_mediana = st.slider("Umbral mediano (%)", 10, 60, 40, key="umbral_mediana_percent")
+        
+        with col3:
+            gota_grande = st.number_input("Gota grande (pl)", value=18.9, min_value=1.0, max_value=50.0, step=0.1)
+            umbral_grande = st.slider("Umbral grande (%)", 30, 100, 40, key="umbral_grande_percent")
+        
+        ventana_size = st.slider("Tamaño ventana análisis", 4, 16, 8, help="Tamaño del bloque para análisis local (píxeles)")
+        
+        # Actualizar configuración
+        if st.button("💾 Aplicar Configuración de Gotas", key="aplicar_gotas"):
+            self.tamanos_gota = {
+                'pequena': gota_pequena,
+                'mediana': gota_mediana,
+                'grande': gota_grande
+            }
+            self.umbral_pequena = umbral_pequena / 100.0
+            self.umbral_mediana = umbral_mediana / 100.0
+            self.umbral_grande = umbral_grande / 100.0
+            self.ventana_size = ventana_size
+            st.success("✅ Configuración de gotas aplicada")
+            
+        # Mostrar configuración actual
+        st.info(f"**Configuración actual:** "
+                f"Pequeña: {self.tamanos_gota['pequena']}pl (<{self.umbral_pequena*100:.0f}%), "
+                f"Mediana: {self.tamanos_gota['mediana']}pl ({self.umbral_pequena*100:.0f}-{self.umbral_mediana*100:.0f}%), "
+                f"Grande: {self.tamanos_gota['grande']}pl (>{self.umbral_mediana*100:.0f}%)")
+
 # =============================================================================
-# INTERFAZ STREAMLIT - ACTUALIZADA CON DITHERING
+# INTERFAZ STREAMLIT - ACTUALIZADA CON MÚLTIPLES TAMAÑOS DE GOTA
 # =============================================================================
 
     def mostrar_interfaz_principal(self):
@@ -880,7 +850,7 @@ class CMYKRGConverterSimple:
         
         # Pestañas diferentes según tipo de usuario
         if st.session_state.tipo_usuario == "tecnico":
-            tab1, tab2, tab3 = st.tabs(["⚙️ Configuración y Cálculo", "📊 Resultados", "📋 Historial"])
+            tab1, tab2, tab3, tab4 = st.tabs(["⚙️ Configuración y Cálculo", "📊 Resultados", "💧 Configuración Gotas", "📋 Historial"])
         else:
             tab1, tab2 = st.tabs(["📁 Subir y Calcular", "📊 Resultados"])
         
@@ -892,6 +862,8 @@ class CMYKRGConverterSimple:
             
         if st.session_state.tipo_usuario == "tecnico":
             with tab3:
+                self.mostrar_configuracion_gotas()
+            with tab4:
                 self.mostrar_historial_procesamientos()
     
     def mostrar_configuracion(self):
@@ -926,22 +898,6 @@ class CMYKRGConverterSimple:
                 key="resolucion_select"
             )
             self.cambiar_resolucion(resolucion)
-        
-        # AÑADIR OPCIÓN DE DITHERING
-        metodo_dithering = "floyd_steinberg"  # Por defecto
-        
-        if st.session_state.tipo_usuario == "tecnico":
-            st.markdown("---")
-            st.subheader("🎨 Optimización Dithering")
-            
-            metodo_dithering = st.selectbox(
-                "Método de dithering:",
-                ["ninguno", "floyd_steinberg", "umbral_adaptativo"],
-                help="Simula cómo el RIP optimiza el consumo eliminando puntos aislados"
-            )
-            
-            if metodo_dithering != "ninguno":
-                st.info(f"🔧 Se aplicará: {metodo_dithering.replace('_', ' ').title()}")
         
         # Información de la imagen
         if uploaded_file is not None:
@@ -1011,18 +967,16 @@ class CMYKRGConverterSimple:
                         if self.modelo_actual is None:
                             st.error("❌ No hay modelo cargado para la resolución seleccionada")
                         else:
-                            with st.spinner("Procesando imagen con optimización dithering..."):
-                                # USAR LA VERSIÓN CON DITHERING
-                                resultados = self.procesar_imagen_con_dithering(
+                            with st.spinner("Procesando imagen con múltiples tamaños de gota..."):
+                                # USAR LA VERSIÓN COMPLETA CON MÚLTIPLES TAMAÑOS DE GOTA
+                                resultados = self.procesar_imagen_completa(
                                     uploaded_file, 
                                     resolucion, 
-                                    batch_size=10000,
-                                    metodo_dithering=metodo_dithering
+                                    batch_size=10000
                                 )
                                 st.session_state.ultimos_resultados = resultados
                                 if resultados:
-                                    reduccion = resultados.get('reduccion_cobertura', '0%')
-                                    st.success(f"✅ {uploaded_file.name} procesado! Reducción de cobertura: {reduccion}")
+                                    st.success(f"✅ {uploaded_file.name} procesado correctamente! Ve a la pestaña 'Resultados'")
                                 else:
                                     st.error(f"❌ Error procesando {uploaded_file.name}")
                         
@@ -1104,11 +1058,7 @@ class CMYKRGConverterSimple:
         
         # Información del archivo procesado
         st.info(f"📁 **Archivo procesado:** {resultados.get('archivo_procesado', 'N/A')}")
-        
-        # Información de optimización dithering
-        if 'metodo_dithering' in resultados and resultados['metodo_dithering'] != 'ninguno':
-            st.success(f"🎨 **Optimización aplicada:** {resultados['metodo_dithering'].replace('_', ' ').title()}")
-            st.success(f"📊 **Cobertura:** {resultados['cobertura_original']} → {resultados['cobertura_optimizada']} ({resultados['reduccion_cobertura']} reducción)")
+        st.success(f"🔧 **Método:** {resultados.get('metodo', 'N/A')} - {resultados.get('tamanos_gota_utilizados', 'N/A')}")
         
         # Información detallada SOLO para técnicos
         if st.session_state.tipo_usuario == "tecnico":
@@ -1120,9 +1070,8 @@ class CMYKRGConverterSimple:
                     st.write(f"- Resolución: {resultados['resolucion']}")
                     st.write(f"- DPI real detectado: {resultados.get('dpi_real', 'N/A')}")
                     st.write(f"- Dimensiones: {resultados['dimensiones']}")
-                    st.write(f"- Método: Estimación CMYK Doble + RG Simple")
-                    if 'metodo_dithering' in resultados:
-                        st.write(f"- Dithering: {resultados['metodo_dithering']}")
+                    st.write(f"- Método: {resultados.get('metodo', 'N/A')}")
+                    st.write(f"- Tamaños de gota: {resultados.get('tamanos_gota_utilizados', 'N/A')}")
                 
                 with col_det2:
                     st.write("**Especificaciones:**")
@@ -1138,12 +1087,11 @@ class CMYKRGConverterSimple:
             for tinta, datos in resultados['consumos_detallados'].items():
                 tintas_data.append({
                     'Tinta': tinta,
-                    'Cobertura (%)': f"{datos['cobertura_promedio']:.1f}%",
                     'Consumo (g/m²)': f"{datos['masa_g_m2']:.4f}",
-                    'Volumen (ml/m²)': f"{datos['volumen_ml_m2']:.6f}",
-                    'Total (g)': f"{datos['g_total']:.4f}",
-                    'Total (ml)': f"{datos['ml_total']:.4f}",
-                    'Tipo Cabezal': "Doble" if datos['factores_cabezal'] == 2.0 else "Simple"
+                    'Volumen (ml)': f"{datos['volumen_ml']:.4f}",
+                    'Masa (g)': f"{datos['masa_g']:.4f}",
+                    'Distribución Gotas': datos['distribucion_gotas'],
+                    'Factor Cabezal': datos['factor_cabezal']
                 })
             
             df_tintas = pd.DataFrame(tintas_data)
@@ -1160,6 +1108,22 @@ class CMYKRGConverterSimple:
             })
             
             st.bar_chart(chart_data.set_index('Tinta'))
+            
+            # Distribución de tamaños de gota
+            st.subheader("💧 Distribución de Tamaños de Gota")
+            
+            datos_gotas = []
+            for tinta, datos in resultados['consumos_detallados'].items():
+                datos_gotas.append({
+                    'Tinta': tinta,
+                    'Gotas Pequeñas': datos['puntos_pequenos'],
+                    'Gotas Medianas': datos['puntos_medianos'], 
+                    'Gotas Grandes': datos['puntos_grandes'],
+                    'Distribución': datos['distribucion_gotas']
+                })
+            
+            df_gotas = pd.DataFrame(datos_gotas)
+            st.dataframe(df_gotas, width='stretch')
 
 # =============================================================================
 # EJECUCIÓN PRINCIPAL
@@ -1171,7 +1135,7 @@ def main():
     if not st.session_state.autenticado:
         mostrar_login()
     else:
-        app = CMYKRGConverterSimple()
+        app = CMYKRGConverterCompleto()
         app.mostrar_interfaz_principal()
 
 if __name__ == "__main__":
