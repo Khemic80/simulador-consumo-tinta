@@ -133,7 +133,7 @@ def mostrar_login():
     st.info("💡 **Nota:** Esta aplicación es de acceso restringido. Contacta al administrador para obtener credenciales.")
 
 # =============================================================================
-# CLASE PRINCIPAL - VERSIÓN COMPLETA CON MÚLTIPLES TAMAÑOS DE GOTA
+# CLASE PRINCIPAL - VERSIÓN COMPLETA CORREGIDA
 # =============================================================================
 
 class CMYKRGConverterCompleto:
@@ -370,27 +370,32 @@ class CMYKRGConverterCompleto:
         return X_enhanced
 
     # =============================================================================
-    # MÉTODOS DE FILTRADO DE BLANCOS - NUEVOS
+    # MÉTODOS DE FILTRADO DE BLANCOS - CORREGIDOS
     # =============================================================================
     
     def aplicar_filtro_blancos_tolerancia(self, img_array, cmykrg_predictions, tolerancia=5):
-        """Establecer cobertura 0% para píxeles casi blancos"""
-        img_flat = img_array.reshape(-1, 3)
+        """Versión segura - solo aplica filtro si dimensiones coinciden"""
+        height, width = img_array.shape[:2]
+        total_pixels_img = height * width
+        total_pixels_pred = len(cmykrg_predictions)
         
-        # Píxeles con todos los canales > (255 - tolerancia) se consideran blancos
-        blancos_mask = np.all(img_flat >= (255 - tolerancia), axis=1)
-        
-        # Para píxeles blancos, establecer todas las tintas a 0%
-        cmykrg_predictions[blancos_mask] = 0
-        
-        if st.session_state.tipo_usuario == "tecnico" and np.any(blancos_mask):
-            porcentaje_blancos = (np.sum(blancos_mask) / len(blancos_mask)) * 100
-            st.info(f"🎯 Píxeles casi-blancos detectados: {porcentaje_blancos:.1f}% -> Cobertura 0%")
+        # Verificar coincidencia de dimensiones
+        if total_pixels_img == total_pixels_pred:
+            img_flat = img_array.reshape(-1, 3)
+            blancos_mask = np.all(img_flat >= (255 - tolerancia), axis=1)
+            cmykrg_predictions[blancos_mask] = 0
+            
+            if st.session_state.tipo_usuario == "tecnico" and np.any(blancos_mask):
+                porcentaje_blancos = (np.sum(blancos_mask) / len(blancos_mask)) * 100
+                st.info(f"🎯 Píxeles casi-blancos detectados: {porcentaje_blancos:.1f}% -> Cobertura 0%")
+        else:
+            if st.session_state.tipo_usuario == "tecnico":
+                st.warning(f"⚠️ No se aplicó filtro blancos: dim. no coinciden ({total_pixels_img} vs {total_pixels_pred})")
         
         return cmykrg_predictions
 
     # =============================================================================
-    # MÉTODOS DE DITHERING - NUEVOS
+    # MÉTODOS DE DITHERING - CORREGIDOS
     # =============================================================================
     
     def aplicar_dithering_floyd_steinberg(self, cmykrg_predictions, img_shape):
@@ -442,11 +447,11 @@ class CMYKRGConverterCompleto:
         return np.clip(img, 0, 100)
 
     # =============================================================================
-    # MÉTODOS DE MÚLTIPLES TAMAÑOS DE GOTA - NUEVOS
+    # MÉTODOS DE MÚLTIPLES TAMAÑOS DE GOTA - CORREGIDOS
     # =============================================================================
     
     def aplicar_tamanos_gota_adaptativos(self, cmykrg_predictions, img_shape):
-        """Aplicar diferentes tamaños de gota según cobertura local"""
+        """Aplicar diferentes tamaños de gota - CORREGIDO"""
         height, width = img_shape[:2]
         canales = cmykrg_predictions.shape[1]
         
@@ -489,27 +494,31 @@ class CMYKRGConverterCompleto:
                         tamano = 'grande'
                         idx = 2
                     
-                    # Calcular volumen para este bloque
+                    # ✅ CORRECCIÓN: Cálculo de volumen FIXED
                     volumen_gota_pl = self.tamanos_gota[tamano]
-                    cobertura_total = np.sum(pixeles_significativos) / 100.0
-                    volumen_bloque_ml = (cobertura_total * volumen_gota_pl * 1e-9)  # pl -> ml
+                    
+                    # Cada píxel significativo recibe UNA gota del tamaño seleccionado
+                    num_puntos = len(pixeles_significativos)
+                    volumen_bloque_pl = num_puntos * volumen_gota_pl  # picolitros totales
+                    volumen_bloque_ml = volumen_bloque_pl * 1e-9      # convertir a mililitros
                     
                     volumen_total_ml[canal] += volumen_bloque_ml
-                    conteo_gotas[canal, idx] += len(pixeles_significativos)
+                    conteo_gotas[canal, idx] += num_puntos
                     
                     bloques_procesados += 1
-        
+    
         if st.session_state.tipo_usuario == "tecnico":
             st.info(f"🔍 Procesados {bloques_procesados} bloques de {self.ventana_size}x{self.ventana_size} píxeles")
-        
+            st.info(f"💧 Volumen total base (sin factores): {np.sum(volumen_total_ml):.6f} ml")
+    
         return volumen_total_ml, conteo_gotas
 
     def calcular_consumo_con_gotas_adaptativas(self, cmykrg_predictions, img_shape, resolucion_y, image, filename):
-        """Calcular consumo usando múltiples tamaños de gota"""
+        """Calcular consumo - CORREGIDO con cálculo de volumen apropiado"""
         
         # PRIMERO: Aplicar filtro de blancos
-        img_array = np.array(image)
-        cmykrg_filtrado = self.aplicar_filtro_blancos_tolerancia(img_array, cmykrg_predictions.copy())
+        img_array_original = np.array(image)
+        cmykrg_filtrado = self.aplicar_filtro_blancos_tolerancia(img_array_original, cmykrg_predictions.copy())
         
         # SEGUNDO: Aplicar dithering
         cmykrg_optimizado = self.aplicar_dithering_floyd_steinberg(cmykrg_filtrado, img_shape)
@@ -524,8 +533,8 @@ class CMYKRGConverterCompleto:
         alto_cm = (height_orig / dpi_real) * 2.54
         area_m2 = (ancho_cm * alto_cm) / 10000.0
 
-        # Factores de cabezal (MANTENER ORIGINALES)
-        factores_cabezal = [2.25, 2.25, 2.25, 2.25, 1.15, 1.15]  # C,M,Y,K,R,G
+        # ✅ MANTENER FACTORES ORIGINALES
+        factores_cabezal = [2.25, 2.25, 2.25, 2.25, 1.15, 1.15]  # C,M,Y,K,R,G - ORIGINALES
         canales = ['Cian', 'Magenta', 'Amarillo', 'Negro', 'Rojo', 'Verde']
         
         # Calcular consumo final
@@ -565,6 +574,11 @@ class CMYKRGConverterCompleto:
         
         consumo_total_ml = consumo_total_g / densidad_tinta
         
+        if st.session_state.tipo_usuario == "tecnico":
+            st.info(f"📊 Área calculada: {area_m2:.6f} m²")
+            st.info(f"📈 Consumo total: {consumo_total_g_m2:.4f} g/m²")
+            st.info(f"🔢 Total puntos significativos: {np.sum(conteo_gotas):,}")
+    
         return {
             'total_g_m2': consumo_total_g_m2,
             'total_ml': consumo_total_ml,
@@ -575,7 +589,7 @@ class CMYKRGConverterCompleto:
             'dimensiones': f"{ancho_cm:.1f}x{alto_cm:.1f} cm",
             'dpi_real': dpi_real,
             'archivo_procesado': filename,
-            'metodo': 'GOTAS_ADAPTATIVAS',
+            'metodo': 'GOTAS_ADAPTATIVAS_CORREGIDO',
             'tamanos_gota_utilizados': '6.3pl, 12.6pl, 18.9pl'
         }
 
