@@ -133,7 +133,7 @@ def mostrar_login():
     st.info("💡 **Nota:** Esta aplicación es de acceso restringido. Contacta al administrador para obtener credenciales.")
 
 # =============================================================================
-# CLASE PRINCIPAL - VERSIÓN COMPLETA CORREGIDA QUE SÍ USA EL MODELO
+# CLASE PRINCIPAL - VERSIÓN COMPLETA CON 3 TIPOS DE DISTRIBUCIÓN
 # =============================================================================
 
 class CMYKRGConverterCompleto:
@@ -151,6 +151,28 @@ class CMYKRGConverterCompleto:
             'mediana': 12.6,   # pl - cobertura media
             'grande': 18.9     # pl - áreas sólidas
         }
+        
+        # ✅ DISTRIBUCIONES POR TIPO DE TRABAJO
+        self.distribuciones = {
+            'fotografia': {
+                'baja': [0.70, 0.25, 0.05],    # < 20% cobertura
+                'media': [0.40, 0.45, 0.15],   # 20-50% cobertura  
+                'alta': [0.20, 0.50, 0.30]     # > 50% cobertura
+            },
+            'comercial': {
+                'baja': [0.50, 0.40, 0.10],
+                'media': [0.30, 0.50, 0.20], 
+                'alta': [0.15, 0.45, 0.40]
+            },
+            'industrial': {
+                'baja': [0.30, 0.50, 0.20],
+                'media': [0.20, 0.40, 0.40],
+                'alta': [0.10, 0.30, 0.60]
+            }
+        }
+        
+        # ✅ TIPO DE TRABAJO POR DEFECTO
+        self.tipo_trabajo_actual = 'comercial'
         
         if getattr(sys, 'frozen', False):
             self.script_dir = os.path.dirname(sys.executable)
@@ -439,26 +461,39 @@ class CMYKRGConverterCompleto:
         return np.clip(img, 0, 100)
 
     # =============================================================================
-    # MÉTODO PRINCIPAL CORREGIDO - QUE SÍ USA EL MODELO COMPLETAMENTE
+    # MÉTODO PRINCIPAL CORREGIDO - CON 3 TIPOS DE DISTRIBUCIÓN
     # =============================================================================
     
-    def calcular_consumo_con_modelo_completo(self, cmykrg_predictions, img_shape, resolucion_y, image, filename):
-        """VERSIÓN CORREGIDA - usa TODAS las predicciones del modelo por canal"""
+    def get_distribucion_gotas(self, cobertura_canal):
+        """Obtener distribución según tipo de trabajo actual y cobertura"""
+        if cobertura_canal < 0.20:
+            categoria = 'baja'
+        elif cobertura_canal < 0.50:
+            categoria = 'media'
+        else:
+            categoria = 'alta'
         
-        # 1. CALCULAR PUNTOS DE IMPRESIÓN POR m² (basado en resolución de impresión)
-        dpi_x = float(resolucion_x)  # 600 DPI
-        dpi_y = float(resolucion_y)  # 600 DPI
-        puntos_por_pulgada2 = dpi_x * dpi_y  # 360,000 puntos/pulgada²
-        puntos_por_m2 = puntos_por_pulgada2 * (10000 / (2.54 * 2.54))  # ≈ 55,700,000 puntos/m²
+        return self.distribuciones[self.tipo_trabajo_actual][categoria]
+    
+    def calcular_consumo_con_modelo_completo(self, cmykrg_predictions, img_shape, resolucion_y, image, filename):
+        """VERSIÓN CORREGIDA - usa distribución seleccionada por tipo de trabajo"""
+        
+        # 1. CALCULAR PUNTOS DE IMPRESIÓN POR m²
+        dpi_x = float(resolucion_x)
+        dpi_y = float(resolucion_y)
+        puntos_por_pulgada2 = dpi_x * dpi_y
+        puntos_por_m2 = puntos_por_pulgada2 * (10000 / (2.54 * 2.54))
         
         if st.session_state.tipo_usuario == "tecnico":
+            st.info(f"🎯 Resolución: {dpi_x}x{dpi_y} DPI")
             st.info(f"🎯 Puntos por m²: {puntos_por_m2:,.0f}")
+            st.info(f"🎯 Tipo de trabajo: {self.tipo_trabajo_actual.upper()}")
         
-        # 2. ✅ USAR LAS PREDICCIONES POR CANAL del modelo entrenado
+        # 2. USAR LAS PREDICCIONES POR CANAL del modelo entrenado
         canales = ['Cian', 'Magenta', 'Amarillo', 'Negro', 'Rojo', 'Verde']
-        factores_cabezal = [2.25, 2.25, 2.25, 2.25, 1.15, 1.15]  # ORIGINALES
+        factores_cabezal = [2.25, 2.25, 2.25, 2.25, 1.15, 1.15]
         
-        # Calcular cobertura promedio POR CANAL (usando TODAS las predicciones del modelo)
+        # Calcular cobertura promedio POR CANAL
         coberturas_por_canal = np.mean(cmykrg_predictions / 100.0, axis=0)
         
         if st.session_state.tipo_usuario == "tecnico":
@@ -476,28 +511,17 @@ class CMYKRGConverterCompleto:
             # 3. CALCULAR PUNTOS A IMPRIMIR por m² para ESTE CANAL
             puntos_a_imprimir_por_m2 = puntos_por_m2 * cobertura_canal
             
-            # 4. DISTRIBUIR POR TAMAÑOS DE GOTA para este canal (basado en cobertura)
-            if cobertura_canal < 0.15:
-                # Baja cobertura: 80% pequeñas, 20% medianas
-                puntos_pequenos = puntos_a_imprimir_por_m2 * 0.8
-                puntos_medianos = puntos_a_imprimir_por_m2 * 0.2
-                puntos_grandes = 0
-            elif cobertura_canal < 0.40:
-                # Cobertura media: 40% pequeñas, 50% medianas, 10% grandes
-                puntos_pequenos = puntos_a_imprimir_por_m2 * 0.4
-                puntos_medianos = puntos_a_imprimir_por_m2 * 0.5
-                puntos_grandes = puntos_a_imprimir_por_m2 * 0.1
-            else:
-                # Alta cobertura: 20% pequeñas, 40% medianas, 40% grandes
-                puntos_pequenos = puntos_a_imprimir_por_m2 * 0.2
-                puntos_medianos = puntos_a_imprimir_por_m2 * 0.4
-                puntos_grandes = puntos_a_imprimir_por_m2 * 0.4
+            # 4. ✅ USAR DISTRIBUCIÓN SEGÚN TIPO DE TRABAJO
+            distribucion = self.get_distribucion_gotas(cobertura_canal)
+            puntos_pequenos = puntos_a_imprimir_por_m2 * distribucion[0]
+            puntos_medianos = puntos_a_imprimir_por_m2 * distribucion[1]
+            puntos_grandes = puntos_a_imprimir_por_m2 * distribucion[2]
             
             # 5. CALCULAR VOLUMEN para este canal
             volumen_pl_por_m2 = (puntos_pequenos * self.tamanos_gota['pequena'] + 
                                 puntos_medianos * self.tamanos_gota['mediana'] + 
                                 puntos_grandes * self.tamanos_gota['grande'])
-            volumen_ml_por_m2 = volumen_pl_por_m2 * 1e-9  # picolitros → mililitros
+            volumen_ml_por_m2 = volumen_pl_por_m2 * 1e-9
             
             # 6. APLICAR FACTOR DE CABEZAL específico
             volumen_canal_ml_m2 = volumen_ml_por_m2 * factor_cabezal
@@ -523,10 +547,11 @@ class CMYKRGConverterCompleto:
                 'puntos_pequenos': int(puntos_pequenos),
                 'puntos_medianos': int(puntos_medianos),
                 'puntos_grandes': int(puntos_grandes),
-                'factor_cabezal': factor_cabezal
+                'factor_cabezal': factor_cabezal,
+                'tipo_distribucion': self.tipo_trabajo_actual
             }
         
-        # 7. CALCULAR PARA EL ÁREA ESPECÍFICA de esta imagen
+        # 7. CALCULAR PARA EL ÁREA ESPECÍFICA
         width_orig, height_orig = image.size
         dpi_real = self.detectar_dpi_real(image)
         ancho_cm = (width_orig / dpi_real) * 2.54
@@ -539,7 +564,6 @@ class CMYKRGConverterCompleto:
         if st.session_state.tipo_usuario == "tecnico":
             st.info(f"📊 Área calculada: {area_m2:.6f} m²")
             st.info(f"📈 Consumo total: {consumo_total_g_m2:.4f} g/m²")
-            st.info(f"🔢 Puntos totales por m²: {puntos_por_m2:,.0f}")
         
         return {
             'total_g_m2': consumo_total_g_m2,
@@ -552,16 +576,17 @@ class CMYKRGConverterCompleto:
             'dpi_real': dpi_real,
             'archivo_procesado': filename,
             'metodo': 'MODELO_COMPLETO_CORREGIDO',
+            'tipo_trabajo': self.tipo_trabajo_actual,
             'tamanos_gota_utilizados': f"{self.tamanos_gota['pequena']}pl, {self.tamanos_gota['mediana']}pl, {self.tamanos_gota['grande']}pl",
             'puntos_por_m2': puntos_por_m2
         }
 
     # =============================================================================
-    # MÉTODOS DE PROCESAMIENTO PRINCIPAL - ACTUALIZADOS
+    # MÉTODOS DE PROCESAMIENTO PRINCIPAL
     # =============================================================================
     
     def procesar_imagen_completa(self, uploaded_file, resolucion_y, batch_size=10000):
-        """Procesamiento completo USANDO el modelo correctamente"""
+        """Procesamiento completo con distribución seleccionada"""
         try:
             progress_bar = st.progress(0)
             status_text = st.empty()
@@ -585,7 +610,7 @@ class CMYKRGConverterCompleto:
             status_text.text("Procesando por lotes...")
             progress_bar.progress(25)
             
-            # Procesamiento por lotes para obtener predicciones del modelo
+            # Procesamiento por lotes
             height, width = img_optimized.shape[:2]
             total_pixels = height * width
             batch_predictions = []
@@ -614,7 +639,7 @@ class CMYKRGConverterCompleto:
             cmykrg_predictions = np.vstack(batch_predictions)
             cmykrg_predictions = np.clip(cmykrg_predictions, 0, 100)
             
-            # ✅ APLICAR FILTROS (blancos + dithering) a las predicciones del modelo
+            # APLICAR FILTROS
             status_text.text("Aplicando optimizaciones...")
             progress_bar.progress(80)
             
@@ -622,8 +647,8 @@ class CMYKRGConverterCompleto:
             cmykrg_filtrado = self.aplicar_filtro_blancos_tolerancia(img_array_original, cmykrg_predictions.copy())
             cmykrg_optimizado = self.aplicar_dithering_floyd_steinberg(cmykrg_filtrado, img_optimized.shape)
             
-            # ✅ USAR MÉTODO CORREGIDO QUE SÍ USA EL MODELO COMPLETAMENTE
-            status_text.text("Calculando consumo con modelo completo...")
+            # CALCULAR CONSUMO
+            status_text.text("Calculando consumo...")
             progress_bar.progress(90)
             
             resultados = self.calcular_consumo_con_modelo_completo(
@@ -671,7 +696,8 @@ class CMYKRGConverterCompleto:
             'exito': exito,
             'error_msg': error_msg,
             'consumo_total': resultados['total_g_m2'] if resultados and exito else None,
-            'area_m2': resultados['area_m2'] if resultados and exito else None
+            'area_m2': resultados['area_m2'] if resultados and exito else None,
+            'tipo_trabajo': resultados.get('tipo_trabajo', 'comercial') if resultados else None
         }
         
         st.session_state.historial_procesamientos.insert(0, log_entry)
@@ -707,6 +733,7 @@ class CMYKRGConverterCompleto:
                 'Archivo': log['archivo_nombre'],
                 'Usuario': log['usuario'],
                 'Resolución': log['resolucion'],
+                'Tipo Trabajo': log.get('tipo_trabajo', 'comercial'),
                 'Estado': '✅ Éxito' if log['exito'] else '❌ Error',
                 'Consumo (g/m²)': f"{log['consumo_total']:.2f}" if log['consumo_total'] else 'N/A',
                 'Tamaño': f"{log['archivo_tamaño']:,} bytes"
@@ -757,9 +784,59 @@ class CMYKRGConverterCompleto:
                 pass
 
     # =============================================================================
-    # INTERFAZ CONFIGURACIÓN GOTAS - NUEVO
+    # INTERFAZ CONFIGURACIÓN - CON 3 TIPOS DE TRABAJO
     # =============================================================================
     
+    def mostrar_configuracion_trabajo(self):
+        """Interfaz para seleccionar tipo de trabajo (solo técnicos)"""
+        if st.session_state.tipo_usuario != "tecnico":
+            return
+        
+        st.markdown("---")
+        st.subheader("🎯 Configuración de Tipo de Trabajo")
+        
+        # Seleccionar tipo de trabajo
+        tipo_trabajo = st.selectbox(
+            "Tipo de trabajo:",
+            ["comercial", "fotografia", "industrial"],
+            index=0,  # Por defecto comercial
+            help="Define la estrategia de distribución de gotas"
+        )
+        
+        # Mostrar detalles de la distribución seleccionada
+        st.info(f"**Distribución {tipo_trabajo.upper()}:**")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.write("**Baja cobertura (<20%):**")
+            dist = self.distribuciones[tipo_trabajo]['baja']
+            st.write(f"Pequeñas: {dist[0]*100:.0f}%")
+            st.write(f"Medianas: {dist[1]*100:.0f}%")
+            st.write(f"Grandes: {dist[2]*100:.0f}%")
+            
+        with col2:
+            st.write("**Media cobertura (20-50%):**")
+            dist = self.distribuciones[tipo_trabajo]['media']
+            st.write(f"Pequeñas: {dist[0]*100:.0f}%")
+            st.write(f"Medianas: {dist[1]*100:.0f}%")
+            st.write(f"Grandes: {dist[2]*100:.0f}%")
+            
+        with col3:
+            st.write("**Alta cobertura (>50%):**")
+            dist = self.distribuciones[tipo_trabajo]['alta']
+            st.write(f"Pequeñas: {dist[0]*100:.0f}%")
+            st.write(f"Medianas: {dist[1]*100:.0f}%")
+            st.write(f"Grandes: {dist[2]*100:.0f}%")
+        
+        # Aplicar configuración
+        if st.button("💾 Aplicar Tipo de Trabajo", key="aplicar_trabajo"):
+            self.tipo_trabajo_actual = tipo_trabajo
+            st.success(f"✅ Tipo de trabajo aplicado: {tipo_trabajo.upper()}")
+            
+        # Mostrar configuración actual
+        st.info(f"**Configuración actual:** {self.tipo_trabajo_actual.upper()}")
+
     def mostrar_configuracion_gotas(self):
         """Interfaz para configurar tamaños de gota (solo técnicos)"""
         if st.session_state.tipo_usuario != "tecnico":
@@ -779,7 +856,7 @@ class CMYKRGConverterCompleto:
         with col3:
             gota_grande = st.number_input("Gota grande (pl)", value=18.9, min_value=1.0, max_value=50.0, step=0.1)
         
-        # Actualizar configuración
+        # Aplicar configuración
         if st.button("💾 Aplicar Configuración de Gotas", key="aplicar_gotas"):
             self.tamanos_gota = {
                 'pequena': gota_pequena,
@@ -795,7 +872,7 @@ class CMYKRGConverterCompleto:
                 f"Grande: {self.tamanos_gota['grande']}pl")
 
 # =============================================================================
-# INTERFAZ STREAMLIT - ACTUALIZADA
+# INTERFAZ STREAMLIT - ACTUALIZADA CON 3 TIPOS DE TRABAJO
 # =============================================================================
 
     def mostrar_interfaz_principal(self):
@@ -814,6 +891,7 @@ class CMYKRGConverterCompleto:
                 st.title("🖨️ Simulador de Consumo - MODO TÉCNICO 🔧")
             else:
                 st.title("🖨️ Simulador de Consumo de Tinta")
+                st.info(f"🔧 **Modo:** {self.tipo_trabajo_actual.upper()} (configuración por defecto)")
         
         with col_user:
             st.write(f"**Usuario:** {st.session_state.usuario_actual}")
@@ -826,7 +904,7 @@ class CMYKRGConverterCompleto:
         
         # Pestañas diferentes según tipo de usuario
         if st.session_state.tipo_usuario == "tecnico":
-            tab1, tab2, tab3, tab4 = st.tabs(["⚙️ Configuración y Cálculo", "📊 Resultados", "💧 Configuración Gotas", "📋 Historial"])
+            tab1, tab2, tab3, tab4, tab5 = st.tabs(["⚙️ Configuración y Cálculo", "📊 Resultados", "🎯 Tipo Trabajo", "💧 Tamaños Gota", "📋 Historial"])
         else:
             tab1, tab2 = st.tabs(["📁 Subir y Calcular", "📊 Resultados"])
         
@@ -838,8 +916,10 @@ class CMYKRGConverterCompleto:
             
         if st.session_state.tipo_usuario == "tecnico":
             with tab3:
-                self.mostrar_configuracion_gotas()
+                self.mostrar_configuracion_trabajo()
             with tab4:
+                self.mostrar_configuracion_gotas()
+            with tab5:
                 self.mostrar_historial_procesamientos()
     
     def mostrar_configuracion(self):
@@ -943,8 +1023,7 @@ class CMYKRGConverterCompleto:
                         if self.modelo_actual is None:
                             st.error("❌ No hay modelo cargado para la resolución seleccionada")
                         else:
-                            with st.spinner("Procesando imagen con modelo completo..."):
-                                # USAR LA VERSIÓN COMPLETA CORREGIDA
+                            with st.spinner("Procesando imagen..."):
                                 resultados = self.procesar_imagen_completa(
                                     uploaded_file, 
                                     resolucion, 
@@ -989,6 +1068,7 @@ class CMYKRGConverterCompleto:
                     st.write(f"**Modelo 600 cargado:** {self.modelo_600 is not None}")
                     st.write(f"**Modelo 1200 cargado:** {self.modelo_1200 is not None}")
                     st.write(f"**Modelo actual:** {self.modelo_actual is not None}")
+                    st.write(f"**Tipo trabajo actual:** {self.tipo_trabajo_actual}")
                     st.write(f"**Archivos en sesión:** {len(st.session_state.historial_procesamientos)}")
     
     def mostrar_resultados(self):
@@ -1034,7 +1114,7 @@ class CMYKRGConverterCompleto:
         
         # Información del archivo procesado
         st.info(f"📁 **Archivo procesado:** {resultados.get('archivo_procesado', 'N/A')}")
-        st.success(f"🔧 **Método:** {resultados.get('metodo', 'N/A')}")
+        st.success(f"🔧 **Tipo de trabajo:** {resultados.get('tipo_trabajo', 'N/A').upper()}")
         
         # Información detallada SOLO para técnicos
         if st.session_state.tipo_usuario == "tecnico":
@@ -1046,7 +1126,7 @@ class CMYKRGConverterCompleto:
                     st.write(f"- Resolución: {resultados['resolucion']}")
                     st.write(f"- DPI real detectado: {resultados.get('dpi_real', 'N/A')}")
                     st.write(f"- Dimensiones: {resultados['dimensiones']}")
-                    st.write(f"- Método: {resultados.get('metodo', 'N/A')}")
+                    st.write(f"- Tipo de trabajo: {resultados.get('tipo_trabajo', 'N/A').upper()}")
                     st.write(f"- Tamaños de gota: {resultados.get('tamanos_gota_utilizados', 'N/A')}")
                     if 'puntos_por_m2' in resultados:
                         st.write(f"- Puntos por m²: {resultados['puntos_por_m2']:,.0f}")
@@ -1070,7 +1150,7 @@ class CMYKRGConverterCompleto:
                     'Volumen (ml/m²)': f"{datos['volumen_ml_m2']:.6f}",
                     'Puntos/m²': f"{datos['puntos_por_m2']:,.0f}",
                     'Distribución Gotas': datos['distribucion_gotas'],
-                    'Factor Cabezal': datos['factor_cabezal']
+                    'Tipo Distribución': datos.get('tipo_distribucion', 'comercial')
                 })
             
             df_tintas = pd.DataFrame(tintas_data)
