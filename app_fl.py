@@ -580,7 +580,24 @@ class CMYKRGConverterCompleto:
             'tamanos_gota_utilizados': f"{self.tamanos_gota['pequena']}pl, {self.tamanos_gota['mediana']}pl, {self.tamanos_gota['grande']}pl",
             'puntos_por_m2': puntos_por_m2
         }
-
+        # En calcular_consumo_con_modelo_completo, justo después de obtener coberturas_por_canal:
+        
+        # ✅ DIAGNÓSTICO TEMPORAL
+        cobertura_total_promedio = np.mean(cmykrg_predictions)
+        if cobertura_total_promedio < 1.0:  # Si la imagen es casi blanca
+            st.warning(f"🔍 DIAGNÓSTICO: Cobertura total promedio: {cobertura_total_promedio:.2f}%")
+            
+            # Verificar píxeles individuales
+            muestra_pixeles = cmykrg_predictions[:10]  # Primeros 10 píxeles
+            for i, pixel in enumerate(muestra_pixeles):
+                if np.any(pixel > 0):
+                    st.info(f"Pixel {i}: {pixel}")
+        
+        # Verificar imagen original
+        img_array_flat = np.array(image).reshape(-1, 3)
+        muestra_original = img_array_flat[:10]
+        st.info(f"Valores RGB primeros píxeles: {muestra_original}")
+        
     # =============================================================================
     # MÉTODOS DE PROCESAMIENTO PRINCIPAL
     # =============================================================================
