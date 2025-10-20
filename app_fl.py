@@ -388,7 +388,7 @@ class CMYKRGConverterCompleto:
     # =============================================================================
     
     def aplicar_filtro_blancos_tolerancia(self, img_array, cmykrg_predictions, tolerancia=5):
-        """Versión segura - solo aplica filtro si dimensiones coinciden"""
+        """Versión mejorada - solo filtra píxeles que son realmente blancos puros"""
         height, width = img_array.shape[:2]
         total_pixels_img = height * width
         total_pixels_pred = len(cmykrg_predictions)
@@ -396,12 +396,35 @@ class CMYKRGConverterCompleto:
         # Verificar coincidencia de dimensiones
         if total_pixels_img == total_pixels_pred:
             img_flat = img_array.reshape(-1, 3)
-            blancos_mask = np.all(img_flat >= (255 - tolerancia), axis=1)
-            cmykrg_predictions[blancos_mask] = 0
             
-            if st.session_state.tipo_usuario == "tecnico" and np.any(blancos_mask):
+            # ✅ CORRECCIÓN: Solo filtrar píxeles que son BLANCO PURO (255,255,255)
+            # No filtrar píxeles casi-blancos que podrían tener tinta
+            blancos_mask = np.all(img_flat == 255, axis=1)
+            
+            if np.any(blancos_mask):
+                cmykrg_predictions[blancos_mask] = 0
                 porcentaje_blancos = (np.sum(blancos_mask) / len(blancos_mask)) * 100
-                st.info(f"🎯 Píxeles casi-blancos detectados: {porcentaje_blancos:.1f}% -> Cobertura 0%")
+                
+                if st.session_state.tipo_usuario == "tecnico":
+                    st.info(f"🎯 Píxeles blancos puros detectados: {porcentaje_blancos:.1f}% -> Cobertura 0%")
+                
+                # ✅ DIAGNÓSTICO: Mostrar información sobre píxeles no-blancos
+                no_blancos_mask = ~blancos_mask
+                if np.any(no_blancos_mask):
+                    píxeles_no_blancos = np.sum(no_blancos_mask)
+                    porcentaje_no_blancos = (píxeles_no_blancos / len(no_blancos_mask)) * 100
+                    
+                    # Muestra algunos valores de píxeles no-blancos para diagnóstico
+                    muestra_indices = np.where(no_blancos_mask)[0][:5]  # Primeros 5 no-blancos
+                    st.info(f"🔍 Píxeles con tinta detectados: {píxeles_no_blancos:,} ({porcentaje_no_blancos:.1f}%)")
+                    
+                    for i, idx in enumerate(muestra_indices):
+                        rgb_val = img_flat[idx]
+                        pred_val = cmykrg_predictions[idx]
+                        st.info(f"  Pixel {i+1}: RGB{rgb_val} -> CMYKRG{pred_val}")
+            else:
+                if st.session_state.tipo_usuario == "tecnico":
+                    st.info("🔍 No se detectaron píxeles blancos puros - procesando toda la imagen")
         else:
             if st.session_state.tipo_usuario == "tecnico":
                 st.warning(f"⚠️ No se aplicó filtro blancos: dim. no coinciden ({total_pixels_img} vs {total_pixels_pred})")
@@ -466,6 +489,11 @@ class CMYKRGConverterCompleto:
     
     def get_distribucion_gotas(self, cobertura_canal):
         """Obtener distribución según tipo de trabajo actual y cobertura"""
+        # ✅ CORRECCIÓN: Verificar que el tipo de trabajo existe
+        if self.tipo_trabajo_actual not in self.distribuciones:
+            st.warning(f"⚠️ Tipo de trabajo '{self.tipo_trabajo_actual}' no encontrado, usando 'comercial'")
+            self.tipo_trabajo_actual = 'comercial'
+        
         if cobertura_canal < 0.20:
             categoria = 'baja'
         elif cobertura_canal < 0.50:
@@ -473,11 +501,50 @@ class CMYKRGConverterCompleto:
         else:
             categoria = 'alta'
         
-        return self.distribuciones[self.tipo_trabajo_actual][categoria]
+        distribucion = self.distribuciones[self.tipo_trabajo_actual][categoria]
+        
+        # ✅ DIAGNÓSTICO: Mostrar qué distribución se está usando
+        if st.session_state.tipo_usuario == "tecnico":
+            st.info(f"🎯 Distribución: {self.tipo_trabajo_actual.upper()} - {categoria.upper()} -> P:{distribucion[0]*100:.0f}%, M:{distribucion[1]*100:.0f}%, G:{distribucion[2]*100:.0f}%")
+        
+        return distribucion
     
     def calcular_consumo_con_modelo_completo(self, cmykrg_predictions, img_shape, resolucion_y, image, filename):
         """VERSIÓN CORREGIDA - usa distribución seleccionada por tipo de trabajo"""
         
+        # ✅ DIAGNÓSTICO MEJORADO - Verificar qué está pasando con las predicciones
+        def verificar_predicciones(cmykrg_predictions, img_array, sample_size=10):
+            """Función de diagnóstico para verificar predicciones"""
+            total_pixels = len(cmykrg_predictions)
+            
+            # Estadísticas básicas
+            cobertura_promedio = np.mean(cmykrg_predictions)
+            cobertura_maxima = np.max(cmykrg_predictions)
+            cobertura_minima = np.min(cmykrg_predictions)
+            
+            st.info(f"📊 ESTADÍSTICAS PREDICCIONES:")
+            st.info(f"  - Cobertura promedio: {cobertura_promedio:.4f}%")
+            st.info(f"  - Cobertura máxima: {cobertura_maxima:.2f}%")
+            st.info(f"  - Cobertura mínima: {cobertura_minima:.2f}%")
+            
+            # Contar píxeles con cobertura significativa (>1%)
+            pixeles_con_cobertura = np.sum(cmykrg_predictions > 1.0)
+            porcentaje_con_cobertura = (pixeles_con_cobertura / total_pixels) * 100
+            st.info(f"  - Píxeles con cobertura >1%: {pixeles_con_cobertura:,} ({porcentaje_con_cobertura:.2f}%)")
+            
+            # Muestra una muestra de píxeles y sus predicciones
+            st.info("🔍 MUESTRA DE PÍXELES (primeros {}):".format(sample_size))
+            img_flat = img_array.reshape(-1, 3)
+            
+            for i in range(min(sample_size, total_pixels)):
+                rgb = img_flat[i]
+                pred = cmykrg_predictions[i]
+                st.info(f"  Pixel {i}: RGB{rgb} -> CMYKRG{pred}")
+        
+        # ✅ DIAGNÓSTICO COMPLETO
+        if st.session_state.tipo_usuario == "tecnico":
+            verificar_predicciones(cmykrg_predictions, np.array(image))
+
         # 1. CALCULAR PUNTOS DE IMPRESIÓN POR m²
         dpi_x = float(resolucion_x)
         dpi_y = float(resolucion_y)
@@ -580,24 +647,7 @@ class CMYKRGConverterCompleto:
             'tamanos_gota_utilizados': f"{self.tamanos_gota['pequena']}pl, {self.tamanos_gota['mediana']}pl, {self.tamanos_gota['grande']}pl",
             'puntos_por_m2': puntos_por_m2
         }
-        # En calcular_consumo_con_modelo_completo, justo después de obtener coberturas_por_canal:
-        
-        # ✅ DIAGNÓSTICO TEMPORAL
-        cobertura_total_promedio = np.mean(cmykrg_predictions)
-        if cobertura_total_promedio < 1.0:  # Si la imagen es casi blanca
-            st.warning(f"🔍 DIAGNÓSTICO: Cobertura total promedio: {cobertura_total_promedio:.2f}%")
-            
-            # Verificar píxeles individuales
-            muestra_pixeles = cmykrg_predictions[:10]  # Primeros 10 píxeles
-            for i, pixel in enumerate(muestra_pixeles):
-                if np.any(pixel > 0):
-                    st.info(f"Pixel {i}: {pixel}")
-        
-        # Verificar imagen original
-        img_array_flat = np.array(image).reshape(-1, 3)
-        muestra_original = img_array_flat[:10]
-        st.info(f"Valores RGB primeros píxeles: {muestra_original}")
-        
+
     # =============================================================================
     # MÉTODOS DE PROCESAMIENTO PRINCIPAL
     # =============================================================================
@@ -801,7 +851,7 @@ class CMYKRGConverterCompleto:
                 pass
 
     # =============================================================================
-    # INTERFAZ CONFIGURACIÓN - CON 3 TIPOS DE TRABAJO
+    # INTERFAZ CONFIGURACIÓN - CON 3 TIPOS DE TRABAJO (CORREGIDO)
     # =============================================================================
     
     def mostrar_configuracion_trabajo(self):
@@ -812,13 +862,20 @@ class CMYKRGConverterCompleto:
         st.markdown("---")
         st.subheader("🎯 Configuración de Tipo de Trabajo")
         
+        # ✅ CORRECCIÓN: Usar session_state para persistir la selección
+        if 'tipo_trabajo_seleccionado' not in st.session_state:
+            st.session_state.tipo_trabajo_seleccionado = self.tipo_trabajo_actual
+        
         # Seleccionar tipo de trabajo
         tipo_trabajo = st.selectbox(
             "Tipo de trabajo:",
             ["comercial", "fotografia", "industrial"],
-            index=0,  # Por defecto comercial
+            index=["comercial", "fotografia", "industrial"].index(st.session_state.tipo_trabajo_seleccionado),
             help="Define la estrategia de distribución de gotas"
         )
+        
+        # Actualizar la selección en session_state
+        st.session_state.tipo_trabajo_seleccionado = tipo_trabajo
         
         # Mostrar detalles de la distribución seleccionada
         st.info(f"**Distribución {tipo_trabajo.upper()}:**")
@@ -846,13 +903,20 @@ class CMYKRGConverterCompleto:
             st.write(f"Medianas: {dist[1]*100:.0f}%")
             st.write(f"Grandes: {dist[2]*100:.0f}%")
         
-        # Aplicar configuración
-        if st.button("💾 Aplicar Tipo de Trabajo", key="aplicar_trabajo"):
+        # ✅ CORRECCIÓN: Aplicar configuración inmediatamente sin necesidad de botón
+        if self.tipo_trabajo_actual != tipo_trabajo:
             self.tipo_trabajo_actual = tipo_trabajo
             st.success(f"✅ Tipo de trabajo aplicado: {tipo_trabajo.upper()}")
-            
+            st.rerun()
+        
         # Mostrar configuración actual
         st.info(f"**Configuración actual:** {self.tipo_trabajo_actual.upper()}")
+        
+        # ✅ CORRECCIÓN: Botón para forzar la actualización si es necesario
+        if st.button("🔄 Actualizar Configuración", key="actualizar_trabajo"):
+            self.tipo_trabajo_actual = tipo_trabajo
+            st.success(f"✅ Tipo de trabajo actualizado: {tipo_trabajo.upper()}")
+            st.rerun()
 
     def mostrar_configuracion_gotas(self):
         """Interfaz para configurar tamaños de gota (solo técnicos)"""
@@ -862,26 +926,63 @@ class CMYKRGConverterCompleto:
         st.markdown("---")
         st.subheader("💧 Configuración de Tamaños de Gota")
         
+        # ✅ CORRECCIÓN: Usar session_state para persistir los valores
+        if 'gota_pequena_temp' not in st.session_state:
+            st.session_state.gota_pequena_temp = self.tamanos_gota['pequena']
+        if 'gota_mediana_temp' not in st.session_state:
+            st.session_state.gota_mediana_temp = self.tamanos_gota['mediana']
+        if 'gota_grande_temp' not in st.session_state:
+            st.session_state.gota_grande_temp = self.tamanos_gota['grande']
+        
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            gota_pequena = st.number_input("Gota pequeña (pl)", value=6.3, min_value=1.0, max_value=50.0, step=0.1)
+            gota_pequena = st.number_input(
+                "Gota pequeña (pl)", 
+                value=st.session_state.gota_pequena_temp, 
+                min_value=1.0, 
+                max_value=50.0, 
+                step=0.1,
+                key="gota_pequena_input"
+            )
+            st.session_state.gota_pequena_temp = gota_pequena
         
         with col2:
-            gota_mediana = st.number_input("Gota mediana (pl)", value=12.6, min_value=1.0, max_value=50.0, step=0.1)
+            gota_mediana = st.number_input(
+                "Gota mediana (pl)", 
+                value=st.session_state.gota_mediana_temp, 
+                min_value=1.0, 
+                max_value=50.0, 
+                step=0.1,
+                key="gota_mediana_input"
+            )
+            st.session_state.gota_mediana_temp = gota_mediana
         
         with col3:
-            gota_grande = st.number_input("Gota grande (pl)", value=18.9, min_value=1.0, max_value=50.0, step=0.1)
+            gota_grande = st.number_input(
+                "Gota grande (pl)", 
+                value=st.session_state.gota_grande_temp, 
+                min_value=1.0, 
+                max_value=50.0, 
+                step=0.1,
+                key="gota_grande_input"
+            )
+            st.session_state.gota_grande_temp = gota_grande
         
-        # Aplicar configuración
-        if st.button("💾 Aplicar Configuración de Gotas", key="aplicar_gotas"):
-            self.tamanos_gota = {
-                'pequena': gota_pequena,
-                'mediana': gota_mediana,
-                'grande': gota_grande
-            }
-            st.success("✅ Configuración de gotas aplicada")
-            
+        # ✅ CORRECCIÓN: Aplicar configuración con verificación de cambios
+        config_actual = [self.tamanos_gota['pequena'], self.tamanos_gota['mediana'], self.tamanos_gota['grande']]
+        config_nueva = [gota_pequena, gota_mediana, gota_grande]
+        
+        if config_actual != config_nueva:
+            if st.button("💾 Aplicar Configuración de Gotas", key="aplicar_gotas"):
+                self.tamanos_gota = {
+                    'pequena': gota_pequena,
+                    'mediana': gota_mediana,
+                    'grande': gota_grande
+                }
+                st.success("✅ Configuración de gotas aplicada")
+                st.rerun()
+        
         # Mostrar configuración actual
         st.info(f"**Configuración actual:** "
                 f"Pequeña: {self.tamanos_gota['pequena']}pl, "
