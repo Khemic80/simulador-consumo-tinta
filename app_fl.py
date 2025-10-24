@@ -133,7 +133,7 @@ def mostrar_login():
     st.info("💡 **Nota:** Esta aplicación es de acceso restringido. Contacta al administrador para obtener credenciales.")
 
 # =============================================================================
-# CLASE PRINCIPAL - VERSIÓN COMPLETA CON 3 TIPOS DE DISTRIBUCIÓN
+# CLASE PRINCIPAL - VERSIÓN CORREGIDA
 # =============================================================================
 
 class CMYKRGConverterCompleto:
@@ -384,50 +384,41 @@ class CMYKRGConverterCompleto:
         return X_enhanced
 
     # =============================================================================
-    # MÉTODOS DE FILTRADO DE BLANCOS - CORREGIDOS
+    # MÉTODOS DE FILTRADO DE BLANCOS - VERSIÓN OPTIMIZADA
     # =============================================================================
     
     def aplicar_filtro_blancos_tolerancia(self, img_array, cmykrg_predictions, tolerancia=5):
-        """Versión mejorada - solo filtra píxeles que son realmente blancos puros"""
+        """Filtra blancos puros y casi blancos - VERSIÓN OPTIMIZADA"""
         height, width = img_array.shape[:2]
         total_pixels_img = height * width
         total_pixels_pred = len(cmykrg_predictions)
         
-        # Verificar coincidencia de dimensiones
+        # Si las dimensiones coinciden, aplicar filtro
         if total_pixels_img == total_pixels_pred:
             img_flat = img_array.reshape(-1, 3)
             
-            # ✅ CORRECCIÓN: Solo filtrar píxeles que son BLANCO PURO (255,255,255)
-            # No filtrar píxeles casi-blancos que podrían tener tinta
-            blancos_mask = np.all(img_flat == 255, axis=1)
+            # ✅ VERSIÓN OPTIMIZADA: Usar condiciones combinadas
+            # Filtrar píxeles donde TODOS los canales son 254 o 255
+            blancos_mask = np.all((img_flat == 254) | (img_flat == 255), axis=1)
             
             if np.any(blancos_mask):
+                # Aplicar filtro - poner cobertura 0% en píxeles blancos y casi blancos
                 cmykrg_predictions[blancos_mask] = 0
-                porcentaje_blancos = (np.sum(blancos_mask) / len(blancos_mask)) * 100
                 
+                # Solo mostrar info si es técnico
                 if st.session_state.tipo_usuario == "tecnico":
-                    st.info(f"🎯 Píxeles blancos puros detectados: {porcentaje_blancos:.1f}% -> Cobertura 0%")
-                
-                # ✅ DIAGNÓSTICO: Mostrar información sobre píxeles no-blancos
-                no_blancos_mask = ~blancos_mask
-                if np.any(no_blancos_mask):
-                    píxeles_no_blancos = np.sum(no_blancos_mask)
-                    porcentaje_no_blancos = (píxeles_no_blancos / len(no_blancos_mask)) * 100
+                    píxeles_blancos = np.sum(blancos_mask)
+                    porcentaje_blancos = (píxeles_blancos / len(blancos_mask)) * 100
                     
-                    # Muestra algunos valores de píxeles no-blancos para diagnóstico
-                    muestra_indices = np.where(no_blancos_mask)[0][:5]  # Primeros 5 no-blancos
-                    st.info(f"🔍 Píxeles con tinta detectados: {píxeles_no_blancos:,} ({porcentaje_no_blancos:.1f}%)")
+                    # Contar blancos puros separadamente
+                    blancos_puros = np.all(img_flat == 255, axis=1)
+                    píxeles_puros = np.sum(blancos_puros)
+                    píxeles_casi_blancos = píxeles_blancos - píxeles_puros
                     
-                    for i, idx in enumerate(muestra_indices):
-                        rgb_val = img_flat[idx]
-                        pred_val = cmykrg_predictions[idx]
-                        st.info(f"  Pixel {i+1}: RGB{rgb_val} -> CMYKRG{pred_val}")
-            else:
-                if st.session_state.tipo_usuario == "tecnico":
-                    st.info("🔍 No se detectaron píxeles blancos puros - procesando toda la imagen")
-        else:
-            if st.session_state.tipo_usuario == "tecnico":
-                st.warning(f"⚠️ No se aplicó filtro blancos: dim. no coinciden ({total_pixels_img} vs {total_pixels_pred})")
+                    st.success(f"✅ Filtro blancos aplicado:")
+                    st.success(f"   - Píxeles blancos puros (255,255,255): {píxeles_puros:,}")
+                    st.success(f"   - Píxeles casi blancos (combinaciones 254/255): {píxeles_casi_blancos:,}")
+                    st.success(f"   - Total filtrado: {píxeles_blancos:,} píxeles ({porcentaje_blancos:.1f}%)")
         
         return cmykrg_predictions
 
@@ -851,137 +842,78 @@ class CMYKRGConverterCompleto:
                 pass
 
     # =============================================================================
-    # INTERFAZ CONFIGURACIÓN - CON 3 TIPOS DE TRABAJO (CORREGIDO)
+    # INTERFAZ CONFIGURACIÓN - SIMPLIFICADA Y CORREGIDA
     # =============================================================================
     
     def mostrar_configuracion_trabajo(self):
-        """Interfaz para seleccionar tipo de trabajo (solo técnicos)"""
+        """Interfaz simplificada para seleccionar tipo de trabajo"""
         if st.session_state.tipo_usuario != "tecnico":
             return
         
         st.markdown("---")
         st.subheader("🎯 Configuración de Tipo de Trabajo")
         
-        # ✅ CORRECCIÓN: Usar session_state para persistir la selección
-        if 'tipo_trabajo_seleccionado' not in st.session_state:
-            st.session_state.tipo_trabajo_seleccionado = self.tipo_trabajo_actual
-        
         # Seleccionar tipo de trabajo
         tipo_trabajo = st.selectbox(
             "Tipo de trabajo:",
             ["comercial", "fotografia", "industrial"],
-            index=["comercial", "fotografia", "industrial"].index(st.session_state.tipo_trabajo_seleccionado),
+            index=["comercial", "fotografia", "industrial"].index(self.tipo_trabajo_actual),
             help="Define la estrategia de distribución de gotas"
         )
         
-        # Actualizar la selección en session_state
-        st.session_state.tipo_trabajo_seleccionado = tipo_trabajo
-        
-        # Mostrar detalles de la distribución seleccionada
-        st.info(f"**Distribución {tipo_trabajo.upper()}:**")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.write("**Baja cobertura (<20%):**")
-            dist = self.distribuciones[tipo_trabajo]['baja']
-            st.write(f"Pequeñas: {dist[0]*100:.0f}%")
-            st.write(f"Medianas: {dist[1]*100:.0f}%")
-            st.write(f"Grandes: {dist[2]*100:.0f}%")
-            
-        with col2:
-            st.write("**Media cobertura (20-50%):**")
-            dist = self.distribuciones[tipo_trabajo]['media']
-            st.write(f"Pequeñas: {dist[0]*100:.0f}%")
-            st.write(f"Medianas: {dist[1]*100:.0f}%")
-            st.write(f"Grandes: {dist[2]*100:.0f}%")
-            
-        with col3:
-            st.write("**Alta cobertura (>50%):**")
-            dist = self.distribuciones[tipo_trabajo]['alta']
-            st.write(f"Pequeñas: {dist[0]*100:.0f}%")
-            st.write(f"Medianas: {dist[1]*100:.0f}%")
-            st.write(f"Grandes: {dist[2]*100:.0f}%")
-        
-        # ✅ CORRECCIÓN: Aplicar configuración inmediatamente sin necesidad de botón
-        if self.tipo_trabajo_actual != tipo_trabajo:
-            self.tipo_trabajo_actual = tipo_trabajo
-            st.success(f"✅ Tipo de trabajo aplicado: {tipo_trabajo.upper()}")
-            st.rerun()
-        
-        # Mostrar configuración actual
-        st.info(f"**Configuración actual:** {self.tipo_trabajo_actual.upper()}")
-        
-        # ✅ CORRECCIÓN: Botón para forzar la actualización si es necesario
-        if st.button("🔄 Actualizar Configuración", key="actualizar_trabajo"):
+        # Aplicar inmediatamente al cambiar
+        if tipo_trabajo != self.tipo_trabajo_actual:
             self.tipo_trabajo_actual = tipo_trabajo
             st.success(f"✅ Tipo de trabajo actualizado: {tipo_trabajo.upper()}")
-            st.rerun()
+    
+        # Mostrar configuración actual
+        st.info(f"**Configuración actual:** {self.tipo_trabajo_actual.upper()}")
 
     def mostrar_configuracion_gotas(self):
-        """Interfaz para configurar tamaños de gota (solo técnicos)"""
+        """Interfaz simplificada para configurar tamaños de gota"""
         if st.session_state.tipo_usuario != "tecnico":
             return
         
         st.markdown("---")
         st.subheader("💧 Configuración de Tamaños de Gota")
         
-        # ✅ CORRECCIÓN: Usar session_state para persistir los valores
-        if 'gota_pequena_temp' not in st.session_state:
-            st.session_state.gota_pequena_temp = self.tamanos_gota['pequena']
-        if 'gota_mediana_temp' not in st.session_state:
-            st.session_state.gota_mediana_temp = self.tamanos_gota['mediana']
-        if 'gota_grande_temp' not in st.session_state:
-            st.session_state.gota_grande_temp = self.tamanos_gota['grande']
-        
         col1, col2, col3 = st.columns(3)
         
         with col1:
             gota_pequena = st.number_input(
                 "Gota pequeña (pl)", 
-                value=st.session_state.gota_pequena_temp, 
+                value=self.tamanos_gota['pequena'],
                 min_value=1.0, 
                 max_value=50.0, 
-                step=0.1,
-                key="gota_pequena_input"
+                step=0.1
             )
-            st.session_state.gota_pequena_temp = gota_pequena
         
         with col2:
             gota_mediana = st.number_input(
                 "Gota mediana (pl)", 
-                value=st.session_state.gota_mediana_temp, 
+                value=self.tamanos_gota['mediana'],
                 min_value=1.0, 
                 max_value=50.0, 
-                step=0.1,
-                key="gota_mediana_input"
+                step=0.1
             )
-            st.session_state.gota_mediana_temp = gota_mediana
         
         with col3:
             gota_grande = st.number_input(
                 "Gota grande (pl)", 
-                value=st.session_state.gota_grande_temp, 
+                value=self.tamanos_gota['grande'],
                 min_value=1.0, 
                 max_value=50.0, 
-                step=0.1,
-                key="gota_grande_input"
+                step=0.1
             )
-            st.session_state.gota_grande_temp = gota_grande
         
-        # ✅ CORRECCIÓN: Aplicar configuración con verificación de cambios
-        config_actual = [self.tamanos_gota['pequena'], self.tamanos_gota['mediana'], self.tamanos_gota['grande']]
-        config_nueva = [gota_pequena, gota_mediana, gota_grande]
-        
-        if config_actual != config_nueva:
-            if st.button("💾 Aplicar Configuración de Gotas", key="aplicar_gotas"):
-                self.tamanos_gota = {
-                    'pequena': gota_pequena,
-                    'mediana': gota_mediana,
-                    'grande': gota_grande
-                }
-                st.success("✅ Configuración de gotas aplicada")
-                st.rerun()
+        # Botón para aplicar cambios
+        if st.button("💾 Aplicar Configuración de Gotas"):
+            self.tamanos_gota = {
+                'pequena': gota_pequena,
+                'mediana': gota_mediana,
+                'grande': gota_grande
+            }
+            st.success("✅ Configuración de gotas aplicada")
         
         # Mostrar configuración actual
         st.info(f"**Configuración actual:** "
@@ -990,7 +922,7 @@ class CMYKRGConverterCompleto:
                 f"Grande: {self.tamanos_gota['grande']}pl")
 
 # =============================================================================
-# INTERFAZ STREAMLIT - ACTUALIZADA CON 3 TIPOS DE TRABAJO
+# INTERFAZ STREAMLIT - ACTUALIZADA
 # =============================================================================
 
     def mostrar_interfaz_principal(self):
@@ -1235,27 +1167,6 @@ class CMYKRGConverterCompleto:
         st.success(f"🔧 **Tipo de trabajo:** {resultados.get('tipo_trabajo', 'N/A').upper()}")
         
         # Información detallada SOLO para técnicos
-        if st.session_state.tipo_usuario == "tecnico":
-            with st.expander("📋 Detalles del Análisis", expanded=True):
-                col_det1, col_det2 = st.columns(2)
-                
-                with col_det1:
-                    st.write("**Configuración:**")
-                    st.write(f"- Resolución: {resultados['resolucion']}")
-                    st.write(f"- DPI real detectado: {resultados.get('dpi_real', 'N/A')}")
-                    st.write(f"- Dimensiones: {resultados['dimensiones']}")
-                    st.write(f"- Tipo de trabajo: {resultados.get('tipo_trabajo', 'N/A').upper()}")
-                    st.write(f"- Tamaños de gota: {resultados.get('tamanos_gota_utilizados', 'N/A')}")
-                    if 'puntos_por_m2' in resultados:
-                        st.write(f"- Puntos por m²: {resultados['puntos_por_m2']:,.0f}")
-                
-                with col_det2:
-                    st.write("**Especificaciones:**")
-                    st.write(f"- Densidad tinta: {densidad_tinta} g/ml")
-                    st.write(f"- Resolución X fija: {resolucion_x} DPI")
-                    st.write(f"- Factores cabezal: CMYK:2.25, RG:1.15")
-        
-        # Consumo por tinta SOLO para técnicos
         if st.session_state.tipo_usuario == "tecnico" and 'consumos_detallados' in resultados:
             st.subheader("🎨 Consumo Detallado por Tinta")
             
