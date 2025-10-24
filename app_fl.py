@@ -388,7 +388,7 @@ class CMYKRGConverterCompleto:
     # =============================================================================
     
     def aplicar_filtro_blancos_tolerancia(self, img_array, cmykrg_predictions, tolerancia=5):
-        """Filtra blancos puros y casi blancos - VERSIÓN OPTIMIZADA"""
+        """Versión CORREGIDA - solo filtra blancos puros (255,255,255)"""
         height, width = img_array.shape[:2]
         total_pixels_img = height * width
         total_pixels_pred = len(cmykrg_predictions)
@@ -397,28 +397,21 @@ class CMYKRGConverterCompleto:
         if total_pixels_img == total_pixels_pred:
             img_flat = img_array.reshape(-1, 3)
             
-            # ✅ VERSIÓN OPTIMIZADA: Usar condiciones combinadas
-            # Filtrar píxeles donde TODOS los canales son 254 o 255
-            blancos_mask = np.all((img_flat == 254) | (img_flat == 255), axis=1)
+            # ✅ SOLO BLANCOS PUROS: (255,255,255) - NADA MÁS
+            blancos_mask = np.all(img_flat == 255, axis=1)
             
             if np.any(blancos_mask):
-                # Aplicar filtro - poner cobertura 0% en píxeles blancos y casi blancos
+                píxeles_blancos = np.sum(blancos_mask)
+                porcentaje_blancos = (píxeles_blancos / len(blancos_mask)) * 100
+                
+                # Aplicar filtro - poner cobertura 0% SOLO en píxeles blancos puros
                 cmykrg_predictions[blancos_mask] = 0
                 
-                # Solo mostrar info si es técnico
                 if st.session_state.tipo_usuario == "tecnico":
-                    píxeles_blancos = np.sum(blancos_mask)
-                    porcentaje_blancos = (píxeles_blancos / len(blancos_mask)) * 100
-                    
-                    # Contar blancos puros separadamente
-                    blancos_puros = np.all(img_flat == 255, axis=1)
-                    píxeles_puros = np.sum(blancos_puros)
-                    píxeles_casi_blancos = píxeles_blancos - píxeles_puros
-                    
-                    st.success(f"✅ Filtro blancos aplicado:")
-                    st.success(f"   - Píxeles blancos puros (255,255,255): {píxeles_puros:,}")
-                    st.success(f"   - Píxeles casi blancos (combinaciones 254/255): {píxeles_casi_blancos:,}")
-                    st.success(f"   - Total filtrado: {píxeles_blancos:,} píxeles ({porcentaje_blancos:.1f}%)")
+                    st.success(f"✅ Filtro blancos aplicado: {píxeles_blancos:,} píxeles blancos puros ({porcentaje_blancos:.1f}%)")
+            else:
+                if st.session_state.tipo_usuario == "tecnico":
+                    st.info("🔍 No se detectaron píxeles blancos puros - procesando toda la imagen")
         
         return cmykrg_predictions
 
