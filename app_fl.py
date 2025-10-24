@@ -501,240 +501,399 @@ class CMYKRGConverterCompleto:
         return distribucion
     
     def calcular_consumo_con_modelo_completo(self, cmykrg_predictions, img_shape, resolucion_y, image, filename):
-        """VERSIÓN CORREGIDA - usa distribución seleccionada por tipo de trabajo"""
+    """VERSIÓN CORREGIDA con diagnóstico mejorado"""
+    
+    # ✅ DIAGNÓSTICO MEJORADO - Verificar PREDICCIONES REALES
+    def verificar_predicciones_detalladas(cmykrg_predictions, img_array, sample_size=10):
+        """Diagnóstico detallado de las predicciones"""
+        total_pixels = len(cmykrg_predictions)
         
-        # ✅ DIAGNÓSTICO MEJORADO - Verificar qué está pasando con las predicciones
-        def verificar_predicciones(cmykrg_predictions, img_array, sample_size=10):
-            """Función de diagnóstico para verificar predicciones"""
-            total_pixels = len(cmykrg_predictions)
+        # Estadísticas básicas
+        cobertura_promedio = np.mean(cmykrg_predictions)
+        cobertura_maxima = np.max(cmykrg_predictions)
+        cobertura_minima = np.min(cmykrg_predictions)
+        
+        st.info(f"📊 ESTADÍSTICAS PREDICCIONES:")
+        st.info(f"  - Cobertura promedio: {cobertura_promedio:.4f}%")
+        st.info(f"  - Cobertura máxima: {cobertura_maxima:.2f}%")
+        st.info(f"  - Cobertura mínima: {cobertura_minima:.2f}%")
+        
+        # Contar píxeles con diferentes niveles de cobertura
+        pixeles_cero = np.sum(cmykrg_predictions == 0)
+        pixeles_baja = np.sum((cmykrg_predictions > 0) & (cmykrg_predictions <= 1))
+        pixeles_media = np.sum((cmykrg_predictions > 1) & (cmykrg_predictions <= 10))
+        pixeles_alta = np.sum(cmykrg_predictions > 10)
+        
+        st.info(f"🔍 DISTRIBUCIÓN DE COBERTURA:")
+        st.info(f"  - Píxeles con 0%: {pixeles_cero:,} ({(pixeles_cero/total_pixels)*100:.1f}%)")
+        st.info(f"  - Píxeles 0-1%: {pixeles_baja:,} ({(pixeles_baja/total_pixels)*100:.1f}%)")
+        st.info(f"  - Píxeles 1-10%: {pixeles_media:,} ({(pixeles_media/total_pixels)*100:.1f}%)")
+        st.info(f"  - Píxeles >10%: {pixeles_alta:,} ({(pixeles_alta/total_pixels)*100:.1f}%)")
+        
+        # Muestra de píxeles con diferentes niveles de cobertura
+        st.info("🎯 MUESTRA DE PÍXELES CON COBERTURA:")
+        img_flat = img_array.reshape(-1, 3)
+        
+        # Buscar píxeles con cobertura > 0
+        pixeles_con_cobertura = np.where(np.any(cmykrg_predictions > 0, axis=1))[0]
+        
+        if len(pixeles_con_cobertura) > 0:
+            st.success(f"✅ Se encontraron {len(pixeles_con_cobertura)} píxeles con cobertura > 0%")
+            # Mostrar primeros píxeles con cobertura
+            for i in range(min(5, len(pixeles_con_cobertura))):
+                idx = pixeles_con_cobertura[i]
+                rgb = img_flat[idx]
+                pred = cmykrg_predictions[idx]
+                st.info(f"  Pixel {idx}: RGB{rgb} -> CMYKRG{pred}")
+        else:
+            st.error("❌ TODOS los píxeles tienen cobertura 0% - REVISAR MODELO")
             
-            # Estadísticas básicas
-            cobertura_promedio = np.mean(cmykrg_predictions)
-            cobertura_maxima = np.max(cmykrg_predictions)
-            cobertura_minima = np.min(cmykrg_predictions)
-            
-            st.info(f"📊 ESTADÍSTICAS PREDICCIONES:")
-            st.info(f"  - Cobertura promedio: {cobertura_promedio:.4f}%")
-            st.info(f"  - Cobertura máxima: {cobertura_maxima:.2f}%")
-            st.info(f"  - Cobertura mínima: {cobertura_minima:.2f}%")
-            
-            # Contar píxeles con cobertura significativa (>1%)
-            pixeles_con_cobertura = np.sum(cmykrg_predictions > 1.0)
-            porcentaje_con_cobertura = (pixeles_con_cobertura / total_pixels) * 100
-            st.info(f"  - Píxeles con cobertura >1%: {pixeles_con_cobertura:,} ({porcentaje_con_cobertura:.2f}%)")
-            
-            # Muestra una muestra de píxeles y sus predicciones
-            st.info("🔍 MUESTRA DE PÍXELES (primeros {}):".format(sample_size))
-            img_flat = img_array.reshape(-1, 3)
-            
-            for i in range(min(sample_size, total_pixels)):
+            # Mostrar primeros píxeles aunque sean 0 para diagnóstico
+            st.info("🔍 Primeros píxeles (todos 0%):")
+            for i in range(min(5, total_pixels)):
                 rgb = img_flat[i]
                 pred = cmykrg_predictions[i]
                 st.info(f"  Pixel {i}: RGB{rgb} -> CMYKRG{pred}")
-        
-        # ✅ DIAGNÓSTICO COMPLETO
-        if st.session_state.tipo_usuario == "tecnico":
-            verificar_predicciones(cmykrg_predictions, np.array(image))
 
-        # 1. CALCULAR PUNTOS DE IMPRESIÓN POR m²
-        dpi_x = float(resolucion_x)
-        dpi_y = float(resolucion_y)
-        puntos_por_pulgada2 = dpi_x * dpi_y
-        puntos_por_m2 = puntos_por_pulgada2 * (10000 / (2.54 * 2.54))
+    # ✅ DIAGNÓSTICO COMPLETO
+    if st.session_state.tipo_usuario == "tecnico":
+        verificar_predicciones_detalladas(cmykrg_predictions, np.array(image))
+
+    # Verificar que hay predicciones válidas
+    if np.all(cmykrg_predictions == 0):
+        st.error("❌ No se puede calcular: todas las predicciones son 0")
+        return None
+
+    # 1. CALCULAR PUNTOS DE IMPRESIÓN POR m²
+    dpi_x = float(resolucion_x)
+    dpi_y = float(resolucion_y)
+    puntos_por_pulgada2 = dpi_x * dpi_y
+    puntos_por_m2 = puntos_por_pulgada2 * (10000 / (2.54 * 2.54))
+    
+    if st.session_state.tipo_usuario == "tecnico":
+        st.info(f"🎯 Resolución: {dpi_x}x{dpi_y} DPI")
+        st.info(f"🎯 Puntos por m²: {puntos_por_m2:,.0f}")
+        st.info(f"🎯 Tipo de trabajo: {self.tipo_trabajo_actual.upper()}")
+    
+    # 2. USAR LAS PREDICCIONES POR CANAL del modelo entrenado
+    canales = ['Cian', 'Magenta', 'Amarillo', 'Negro', 'Rojo', 'Verde']
+    factores_cabezal = [2.25, 2.25, 2.25, 2.25, 1.15, 1.15]
+    
+    # Calcular cobertura promedio POR CANAL
+    coberturas_por_canal = np.mean(cmykrg_predictions / 100.0, axis=0)
+    
+    if st.session_state.tipo_usuario == "tecnico":
+        coberturas_info = [f"{canal}: {coberturas_por_canal[i]*100:.1f}%" for i, canal in enumerate(canales)]
+        st.info(f"🎨 Coberturas por canal: {', '.join(coberturas_info)}")
+    
+    consumo_total_g_m2 = 0
+    consumo_total_ml = 0
+    consumos_detallados = {}
+    
+    for i, canal in enumerate(canales):
+        cobertura_canal = coberturas_por_canal[i]
+        factor_cabezal = factores_cabezal[i]
         
-        if st.session_state.tipo_usuario == "tecnico":
-            st.info(f"🎯 Resolución: {dpi_x}x{dpi_y} DPI")
-            st.info(f"🎯 Puntos por m²: {puntos_por_m2:,.0f}")
-            st.info(f"🎯 Tipo de trabajo: {self.tipo_trabajo_actual.upper()}")
+        # 3. CALCULAR PUNTOS A IMPRIMIR por m² para ESTE CANAL
+        puntos_a_imprimir_por_m2 = puntos_por_m2 * cobertura_canal
         
-        # 2. USAR LAS PREDICCIONES POR CANAL del modelo entrenado
-        canales = ['Cian', 'Magenta', 'Amarillo', 'Negro', 'Rojo', 'Verde']
-        factores_cabezal = [2.25, 2.25, 2.25, 2.25, 1.15, 1.15]
+        # 4. ✅ USAR DISTRIBUCIÓN SEGÚN TIPO DE TRABAJO
+        distribucion = self.get_distribucion_gotas(cobertura_canal)
+        puntos_pequenos = puntos_a_imprimir_por_m2 * distribucion[0]
+        puntos_medianos = puntos_a_imprimir_por_m2 * distribucion[1]
+        puntos_grandes = puntos_a_imprimir_por_m2 * distribucion[2]
         
-        # Calcular cobertura promedio POR CANAL
-        coberturas_por_canal = np.mean(cmykrg_predictions / 100.0, axis=0)
+        # 5. CALCULAR VOLUMEN para este canal
+        volumen_pl_por_m2 = (puntos_pequenos * self.tamanos_gota['pequena'] + 
+                            puntos_medianos * self.tamanos_gota['mediana'] + 
+                            puntos_grandes * self.tamanos_gota['grande'])
+        volumen_ml_por_m2 = volumen_pl_por_m2 * 1e-9
         
-        if st.session_state.tipo_usuario == "tecnico":
-            coberturas_info = [f"{canal}: {coberturas_por_canal[i]*100:.1f}%" for i, canal in enumerate(canales)]
-            st.info(f"🎨 Coberturas por canal: {', '.join(coberturas_info)}")
+        # 6. APLICAR FACTOR DE CABEZAL específico
+        volumen_canal_ml_m2 = volumen_ml_por_m2 * factor_cabezal
+        masa_canal_g_m2 = volumen_canal_ml_m2 * densidad_tinta
         
-        consumo_total_g_m2 = 0
-        consumo_total_ml = 0
-        consumos_detallados = {}
+        consumo_total_g_m2 += masa_canal_g_m2
         
-        for i, canal in enumerate(canales):
-            cobertura_canal = coberturas_por_canal[i]
-            factor_cabezal = factores_cabezal[i]
-            
-            # 3. CALCULAR PUNTOS A IMPRIMIR por m² para ESTE CANAL
-            puntos_a_imprimir_por_m2 = puntos_por_m2 * cobertura_canal
-            
-            # 4. ✅ USAR DISTRIBUCIÓN SEGÚN TIPO DE TRABAJO
-            distribucion = self.get_distribucion_gotas(cobertura_canal)
-            puntos_pequenos = puntos_a_imprimir_por_m2 * distribucion[0]
-            puntos_medianos = puntos_a_imprimir_por_m2 * distribucion[1]
-            puntos_grandes = puntos_a_imprimir_por_m2 * distribucion[2]
-            
-            # 5. CALCULAR VOLUMEN para este canal
-            volumen_pl_por_m2 = (puntos_pequenos * self.tamanos_gota['pequena'] + 
-                                puntos_medianos * self.tamanos_gota['mediana'] + 
-                                puntos_grandes * self.tamanos_gota['grande'])
-            volumen_ml_por_m2 = volumen_pl_por_m2 * 1e-9
-            
-            # 6. APLICAR FACTOR DE CABEZAL específico
-            volumen_canal_ml_m2 = volumen_ml_por_m2 * factor_cabezal
-            masa_canal_g_m2 = volumen_canal_ml_m2 * densidad_tinta
-            
-            consumo_total_g_m2 += masa_canal_g_m2
-            
-            # Guardar detalles por canal
-            total_puntos_canal = puntos_pequenos + puntos_medianos + puntos_grandes
-            if total_puntos_canal > 0:
-                dist_pequena = (puntos_pequenos / total_puntos_canal) * 100
-                dist_mediana = (puntos_medianos / total_puntos_canal) * 100
-                dist_grande = (puntos_grandes / total_puntos_canal) * 100
-            else:
-                dist_pequena = dist_mediana = dist_grande = 0
-            
-            consumos_detallados[canal] = {
-                'cobertura_promedio': cobertura_canal * 100,
-                'puntos_por_m2': puntos_a_imprimir_por_m2,
-                'volumen_ml_m2': volumen_canal_ml_m2,
-                'masa_g_m2': masa_canal_g_m2,
-                'distribucion_gotas': f"P:{dist_pequena:.1f}%, M:{dist_mediana:.1f}%, G:{dist_grande:.1f}%",
-                'puntos_pequenos': int(puntos_pequenos),
-                'puntos_medianos': int(puntos_medianos),
-                'puntos_grandes': int(puntos_grandes),
-                'factor_cabezal': factor_cabezal,
-                'tipo_distribucion': self.tipo_trabajo_actual
-            }
+        # Guardar detalles por canal
+        total_puntos_canal = puntos_pequenos + puntos_medianos + puntos_grandes
+        if total_puntos_canal > 0:
+            dist_pequena = (puntos_pequenos / total_puntos_canal) * 100
+            dist_mediana = (puntos_medianos / total_puntos_canal) * 100
+            dist_grande = (puntos_grandes / total_puntos_canal) * 100
+        else:
+            dist_pequena = dist_mediana = dist_grande = 0
         
-        # 7. CALCULAR PARA EL ÁREA ESPECÍFICA
-        width_orig, height_orig = image.size
-        dpi_real = self.detectar_dpi_real(image)
-        ancho_cm = (width_orig / dpi_real) * 2.54
-        alto_cm = (height_orig / dpi_real) * 2.54
-        area_m2 = (ancho_cm * alto_cm) / 10000.0
-        
-        consumo_total_g = consumo_total_g_m2 * area_m2
-        consumo_total_ml = consumo_total_g / densidad_tinta
-        
-        if st.session_state.tipo_usuario == "tecnico":
-            st.info(f"📊 Área calculada: {area_m2:.6f} m²")
-            st.info(f"📈 Consumo total: {consumo_total_g_m2:.4f} g/m²")
-        
-        return {
-            'total_g_m2': consumo_total_g_m2,
-            'total_ml': consumo_total_ml,
-            'total_g': consumo_total_g,
-            'area_m2': area_m2,
-            'resolucion': f"{dpi_x}x{dpi_y} DPI",
-            'consumos_detallados': consumos_detallados,
-            'dimensiones': f"{ancho_cm:.1f}x{alto_cm:.1f} cm",
-            'dpi_real': dpi_real,
-            'archivo_procesado': filename,
-            'metodo': 'MODELO_COMPLETO_CORREGIDO',
-            'tipo_trabajo': self.tipo_trabajo_actual,
-            'tamanos_gota_utilizados': f"{self.tamanos_gota['pequena']}pl, {self.tamanos_gota['mediana']}pl, {self.tamanos_gota['grande']}pl",
-            'puntos_por_m2': puntos_por_m2
+        consumos_detallados[canal] = {
+            'cobertura_promedio': cobertura_canal * 100,
+            'puntos_por_m2': puntos_a_imprimir_por_m2,
+            'volumen_ml_m2': volumen_canal_ml_m2,
+            'masa_g_m2': masa_canal_g_m2,
+            'distribucion_gotas': f"P:{dist_pequena:.1f}%, M:{dist_mediana:.1f}%, G:{dist_grande:.1f}%",
+            'puntos_pequenos': int(puntos_pequenos),
+            'puntos_medianos': int(puntos_medianos),
+            'puntos_grandes': int(puntos_grandes),
+            'factor_cabezal': factor_cabezal,
+            'tipo_distribucion': self.tipo_trabajo_actual
         }
+    
+    # 7. CALCULAR PARA EL ÁREA ESPECÍFICA
+    width_orig, height_orig = image.size
+    dpi_real = self.detectar_dpi_real(image)
+    ancho_cm = (width_orig / dpi_real) * 2.54
+    alto_cm = (height_orig / dpi_real) * 2.54
+    area_m2 = (ancho_cm * alto_cm) / 10000.0
+    
+    consumo_total_g = consumo_total_g_m2 * area_m2
+    consumo_total_ml = consumo_total_g / densidad_tinta
+    
+    if st.session_state.tipo_usuario == "tecnico":
+        st.info(f"📊 Área calculada: {area_m2:.6f} m²")
+        st.info(f"📈 Consumo total: {consumo_total_g_m2:.4f} g/m²")
+    
+    return {
+        'total_g_m2': consumo_total_g_m2,
+        'total_ml': consumo_total_ml,
+        'total_g': consumo_total_g,
+        'area_m2': area_m2,
+        'resolucion': f"{dpi_x}x{dpi_y} DPI",
+        'consumos_detallados': consumos_detallados,
+        'dimensiones': f"{ancho_cm:.1f}x{alto_cm:.1f} cm",
+        'dpi_real': dpi_real,
+        'archivo_procesado': filename,
+        'metodo': 'MODELO_COMPLETO_CORREGIDO',
+        'tipo_trabajo': self.tipo_trabajo_actual,
+        'tamanos_gota_utilizados': f"{self.tamanos_gota['pequena']}pl, {self.tamanos_gota['mediana']}pl, {self.tamanos_gota['grande']}pl",
+        'puntos_por_m2': puntos_por_m2
+    }
 
     # =============================================================================
     # MÉTODOS DE PROCESAMIENTO PRINCIPAL
     # =============================================================================
     
     def procesar_imagen_completa(self, uploaded_file, resolucion_y, batch_size=10000):
-        """Procesamiento completo con distribución seleccionada"""
-        try:
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            status_text.text("Cargando imagen...")
-            progress_bar.progress(5)
-            
-            image = Image.open(uploaded_file)
-            if image.mode != 'RGB':
-                image = image.convert('RGB')
-            
-            status_text.text("Optimizando imagen...")
-            progress_bar.progress(15)
-            
-            img_array = np.array(image)
-            img_optimized, was_optimized = self.optimizar_imagen(img_array)
-            
-            if was_optimized and st.session_state.tipo_usuario == "tecnico":
-                st.warning("⚠️ Imagen optimizada por tamaño")
-            
-            status_text.text("Procesando por lotes...")
-            progress_bar.progress(25)
-            
-            # Procesamiento por lotes
-            height, width = img_optimized.shape[:2]
-            total_pixels = height * width
-            batch_predictions = []
-            num_batches = (total_pixels + batch_size - 1) // batch_size
-            
-            if st.session_state.tipo_usuario == "tecnico":
-                st.info(f"🔧 Procesando {total_pixels:,} píxeles en {num_batches} lotes de {batch_size}")
-            
-            for batch_idx in range(num_batches):
-                start_idx = batch_idx * batch_size
-                end_idx = min((batch_idx + 1) * batch_size, total_pixels)
-                
-                progress = 25 + (batch_idx / num_batches) * 40
-                status_text.text(f"Procesando lote {batch_idx + 1}/{num_batches}...")
-                progress_bar.progress(int(progress))
-                
-                batch_pixels = img_optimized.reshape(-1, 3)[start_idx:end_idx]
-                batch_enhanced = self.aplicar_ingenieria_caracteristicas(batch_pixels)
-                batch_scaled = self.scaler_actual.transform(batch_enhanced)
-                batch_pred = self.modelo_actual.predict(batch_scaled)
-                batch_predictions.append(batch_pred)
-            
-            status_text.text("Combinando predicciones...")
-            progress_bar.progress(70)
-            
-            cmykrg_predictions = np.vstack(batch_predictions)
-            cmykrg_predictions = np.clip(cmykrg_predictions, 0, 100)
-            
-            # APLICAR FILTROS
-            status_text.text("Aplicando optimizaciones...")
-            progress_bar.progress(80)
-            
-            img_array_original = np.array(image)
-            cmykrg_filtrado = self.aplicar_filtro_blancos_tolerancia(img_array_original, cmykrg_predictions.copy())
-            cmykrg_optimizado = self.aplicar_dithering_floyd_steinberg(cmykrg_filtrado, img_optimized.shape)
-            
-            # CALCULAR CONSUMO
-            status_text.text("Calculando consumo...")
-            progress_bar.progress(90)
-            
-            resultados = self.calcular_consumo_con_modelo_completo(
-                cmykrg_optimizado, 
-                img_optimized.shape, 
-                resolucion_y, 
-                image, 
-                uploaded_file.name
-            )
-            
-            progress_bar.progress(100)
-            status_text.text("Completado!")
-            
-            self.agregar_log_procesamiento(uploaded_file, resolucion_y, resultados, exito=True)
-            
-            return resultados
-            
-        except Exception as e:
-            error_msg = f"Error en procesamiento completo: {str(e)}"
-            st.error(f"❌ {error_msg}")
-            
-            if st.session_state.tipo_usuario == "tecnico":
-                import traceback
-                st.error(f"🔧 Detalles: {traceback.format_exc()}")
-                
-            self.agregar_log_procesamiento(uploaded_file, resolucion_y, None, exito=False, error_msg=error_msg)
+    """Procesamiento completo con diagnóstico detallado del modelo"""
+    try:
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        status_text.text("Cargando imagen...")
+        progress_bar.progress(5)
+        
+        image = Image.open(uploaded_file)
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        
+        status_text.text("Optimizando imagen...")
+        progress_bar.progress(15)
+        
+        img_array = np.array(image)
+        img_optimized, was_optimized = self.optimizar_imagen(img_array)
+        
+        if was_optimized and st.session_state.tipo_usuario == "tecnico":
+            st.warning("⚠️ Imagen optimizada por tamaño")
+        
+        # ✅ DIAGNÓSTICO: VERIFICAR MODELO Y SCALER
+        if self.modelo_actual is None:
+            st.error("❌ ERROR: Modelo actual es None")
             return None
+            
+        if self.scaler_actual is None:
+            st.error("❌ ERROR: Scaler actual es None")
+            return None
+        
+        if st.session_state.tipo_usuario == "tecnico":
+            st.info(f"🔧 Modelo cargado: {type(self.modelo_actual).__name__}")
+            st.info(f"🔧 Scaler cargado: {type(self.scaler_actual).__name__}")
+        
+        status_text.text("Procesando por lotes...")
+        progress_bar.progress(25)
+        
+        # Procesamiento por lotes con diagnóstico
+        height, width = img_optimized.shape[:2]
+        total_pixels = height * width
+        batch_predictions = []
+        num_batches = (total_pixels + batch_size - 1) // batch_size
+        
+        if st.session_state.tipo_usuario == "tecnico":
+            st.info(f"🔧 Procesando {total_pixels:,} píxeles en {num_batches} lotes de {batch_size}")
+        
+        for batch_idx in range(num_batches):
+            start_idx = batch_idx * batch_size
+            end_idx = min((batch_idx + 1) * batch_size, total_pixels)
+            
+            progress = 25 + (batch_idx / num_batches) * 40
+            status_text.text(f"Procesando lote {batch_idx + 1}/{num_batches}...")
+            progress_bar.progress(int(progress))
+            
+            batch_pixels = img_optimized.reshape(-1, 3)[start_idx:end_idx]
+            
+            # ✅ DIAGNÓSTICO: VERIFICAR DATOS DE ENTRADA
+            if st.session_state.tipo_usuario == "tecnico" and batch_idx == 0:
+                st.info("🔍 DIAGNÓSTICO - Primer lote:")
+                st.info(f"  - Batch pixels shape: {batch_pixels.shape}")
+                st.info(f"  - Batch pixels range: [{batch_pixels.min()}, {batch_pixels.max()}]")
+                st.info(f"  - Batch pixels muestra: {batch_pixels[0]}")
+            
+            batch_enhanced = self.aplicar_ingenieria_caracteristicas(batch_pixels)
+            
+            # ✅ DIAGNÓSTICO: VERIFICAR INGENIERÍA DE CARACTERÍSTICAS
+            if st.session_state.tipo_usuario == "tecnico" and batch_idx == 0:
+                st.info(f"  - Características mejoradas shape: {batch_enhanced.shape}")
+                st.info(f"  - Características mejoradas range: [{batch_enhanced.min():.2f}, {batch_enhanced.max():.2f}]")
+            
+            # ✅ DIAGNÓSTICO: VERIFICAR SCALER
+            try:
+                batch_scaled = self.scaler_actual.transform(batch_enhanced)
+                
+                if st.session_state.tipo_usuario == "tecnico" and batch_idx == 0:
+                    st.info(f"  - Datos escalados shape: {batch_scaled.shape}")
+                    st.info(f"  - Datos escalados range: [{batch_scaled.min():.2f}, {batch_scaled.max():.2f}]")
+                    st.info(f"  - Datos escalados muestra: {batch_scaled[0][:5]}...")  # Primeros 5 valores
+                    
+            except Exception as e:
+                st.error(f"❌ ERROR en scaler.transform(): {e}")
+                if st.session_state.tipo_usuario == "tecnico":
+                    st.error(f"🔧 Scaler info: {self.scaler_actual}")
+                    st.error(f"🔧 Data stats - min: {batch_enhanced.min()}, max: {batch_enhanced.max()}, mean: {batch_enhanced.mean()}")
+                return None
+            
+            # ✅ DIAGNÓSTICO: VERIFICAR PREDICCIÓN DEL MODELO
+            try:
+                batch_pred = self.modelo_actual.predict(batch_scaled)
+                
+                if st.session_state.tipo_usuario == "tecnico" and batch_idx == 0:
+                    st.info(f"  - Predicciones shape: {batch_pred.shape}")
+                    st.info(f"  - Predicciones range: [{batch_pred.min():.2f}, {batch_pred.max():.2f}]")
+                    st.info(f"  - Predicciones muestra: {batch_pred[0]}")
+                    
+            except Exception as e:
+                st.error(f"❌ ERROR en model.predict(): {e}")
+                if st.session_state.tipo_usuario == "tecnico":
+                    st.error(f"🔧 Modelo info: {type(self.modelo_actual).__name__}")
+                    st.error(f"🔧 Input shape para predict: {batch_scaled.shape}")
+                return None
+            
+            batch_predictions.append(batch_pred)
+        
+        status_text.text("Combinando predicciones...")
+        progress_bar.progress(70)
+        
+        cmykrg_predictions = np.vstack(batch_predictions)
+        cmykrg_predictions = np.clip(cmykrg_predictions, 0, 100)
+        
+        # ✅ DIAGNÓSTICO COMPLETO DE LAS PREDICCIONES FINALES
+        if st.session_state.tipo_usuario == "tecnico":
+            self.diagnosticar_predicciones(cmykrg_predictions, img_array)
+        
+        # VERIFICAR SI TODAS LAS PREDICCIONES SON CERO
+        if np.all(cmykrg_predictions == 0):
+            st.error("🚨 PROBLEMA CRÍTICO: Todas las predicciones son 0")
+            st.error("📋 Posibles causas:")
+            st.error("  1. Modelo no está entrenado correctamente")
+            st.error("  2. Scaler no compatible con los datos")
+            st.error("  3. Problema en la ingeniería de características")
+            st.error("  4. Modelo corrupto o incorrecto")
+            return None
+        
+        # APLICAR FILTROS
+        status_text.text("Aplicando optimizaciones...")
+        progress_bar.progress(80)
+        
+        img_array_original = np.array(image)
+        cmykrg_filtrado = self.aplicar_filtro_blancos_tolerancia(img_array_original, cmykrg_predictions.copy())
+        cmykrg_optimizado = self.aplicar_dithering_floyd_steinberg(cmykrg_filtrado, img_optimized.shape)
+        
+        # CALCULAR CONSUMO
+        status_text.text("Calculando consumo...")
+        progress_bar.progress(90)
+        
+        resultados = self.calcular_consumo_con_modelo_completo(
+            cmykrg_optimizado, 
+            img_optimized.shape, 
+            resolucion_y, 
+            image, 
+            uploaded_file.name
+        )
+        
+        progress_bar.progress(100)
+        status_text.text("Completado!")
+        
+        self.agregar_log_procesamiento(uploaded_file, resolucion_y, resultados, exito=True)
+        
+        return resultados
+        
+    except Exception as e:
+        error_msg = f"Error en procesamiento completo: {str(e)}"
+        st.error(f"❌ {error_msg}")
+        
+        if st.session_state.tipo_usuario == "tecnico":
+            import traceback
+            st.error(f"🔧 Detalles completos: {traceback.format_exc()}")
+            
+        self.agregar_log_procesamiento(uploaded_file, resolucion_y, None, exito=False, error_msg=error_msg)
+        return None
 
+    def diagnosticar_predicciones(self, cmykrg_predictions, img_array):
+        """Diagnóstico detallado de las predicciones del modelo"""
+        st.info("🔍 DIAGNÓSTICO COMPLETO DE PREDICCIONES:")
+        
+        total_pixels = len(cmykrg_predictions)
+        
+        # Estadísticas básicas
+        st.info(f"📊 Estadísticas generales:")
+        st.info(f"  - Total píxeles: {total_pixels:,}")
+        st.info(f"  - Shape predicciones: {cmykrg_predictions.shape}")
+        
+        # Estadísticas por canal
+        canales = ['Cian', 'Magenta', 'Amarillo', 'Negro', 'Rojo', 'Verde']
+        for i, canal in enumerate(canales):
+            canal_data = cmykrg_predictions[:, i]
+            st.info(f"🎨 {canal}:")
+            st.info(f"    - Min: {canal_data.min():.4f}")
+            st.info(f"    - Max: {canal_data.max():.4f}")
+            st.info(f"    - Mean: {canal_data.mean():.4f}")
+            st.info(f"    - Std: {canal_data.std():.4f}")
+            st.info(f"    - Píxeles > 0: {np.sum(canal_data > 0):,} ({(np.sum(canal_data > 0)/total_pixels)*100:.2f}%)")
+        
+        # Distribución de cobertura total
+        cobertura_total = np.sum(cmykrg_predictions, axis=1)
+        st.info(f"📈 Cobertura total por píxel:")
+        st.info(f"    - Min: {cobertura_total.min():.4f}")
+        st.info(f"    - Max: {cobertura_total.max():.4f}")
+        st.info(f"    - Mean: {cobertura_total.mean():.4f}")
+        
+        # Contar píxeles por rangos de cobertura
+        st.info(f"📋 Distribución de cobertura:")
+        for umbral in [0, 0.1, 1, 5, 10, 50, 100]:
+            if umbral == 0:
+                count = np.sum(cobertura_total == 0)
+                st.info(f"    - = 0%: {count:,} ({(count/total_pixels)*100:.2f}%)")
+            else:
+                count = np.sum(cobertura_total > umbral)
+                st.info(f"    - > {umbral}%: {count:,} ({(count/total_pixels)*100:.2f}%)")
+        
+        # Muestra de píxeles con diferentes coberturas
+        img_flat = img_array.reshape(-1, 3)
+        
+        # Píxeles con cobertura > 0
+        pixeles_con_cobertura = np.where(cobertura_total > 0)[0]
+        if len(pixeles_con_cobertura) > 0:
+            st.success(f"✅ Píxeles con cobertura > 0: {len(pixeles_con_cobertura):,}")
+            st.info("🔍 Muestra de píxeles CON cobertura:")
+            for i in range(min(3, len(pixeles_con_cobertura))):
+                idx = pixeles_con_cobertura[i]
+                rgb = img_flat[idx]
+                pred = cmykrg_predictions[idx]
+                st.info(f"    Pixel {idx}: RGB{rgb} -> CMYKRG{pred}")
+        else:
+            st.error("❌ TODOS los píxeles tienen cobertura 0%")
+            st.info("🔍 Muestra de píxeles (todos 0%):")
+            for i in range(min(5, total_pixels)):
+                rgb = img_flat[i]
+                pred = cmykrg_predictions[i]
+                st.info(f"    Pixel {i}: RGB{rgb} -> CMYKRG{pred}")
+    
     # =============================================================================
     # MÉTODOS ORIGINALES (MANTENER)
     # =============================================================================
