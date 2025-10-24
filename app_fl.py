@@ -133,7 +133,7 @@ def mostrar_login():
     st.info("💡 **Nota:** Esta aplicación es de acceso restringido. Contacta al administrador para obtener credenciales.")
 
 # =============================================================================
-# CLASE PRINCIPAL - VERSIÓN CORREGIDA CON DIAGNÓSTICO Y FALLBACK
+# CLASE PRINCIPAL - VERSIÓN CORREGIDA
 # =============================================================================
 
 class CMYKRGConverterCompleto:
@@ -185,61 +185,6 @@ class CMYKRGConverterCompleto:
             st.info(f"🔐 Modo: {st.session_state.tipo_usuario.upper()}")
         
         self.cargar_modelos()
-        
-        # Ejecutar diagnóstico si es técnico
-        if st.session_state.tipo_usuario == "tecnico":
-            self.verificar_modelo()
-    
-    def verificar_modelo(self):
-        """Diagnóstico completo del modelo"""
-        if st.session_state.tipo_usuario == "tecnico":
-            st.subheader("🔧 DIAGNÓSTICO DEL MODELO")
-            
-            # Verificar si el scaler está funcionando
-            test_pixel = np.array([[243, 239, 229]])  # Uno de los píxeles problemáticos
-            test_enhanced = self.aplicar_ingenieria_caracteristicas_corregida(test_pixel)
-            
-            st.info(f"Pixel original: {test_pixel}")
-            st.info(f"Pixel con ingeniería: forma {test_enhanced.shape}, valores: {test_enhanced[0][:10]}...")  # Mostrar solo primeros 10
-            
-            if self.scaler_actual:
-                try:
-                    test_scaled = self.scaler_actual.transform(test_enhanced)
-                    st.info(f"Pixel escalado: forma {test_scaled.shape}, valores: {test_scaled[0][:10]}...")
-                    
-                    # Verificar predicción
-                    if self.modelo_actual:
-                        prediction = self.modelo_actual.predict(test_scaled)
-                        st.info(f"Predicción: {prediction[0]}")
-                        
-                        # Verificar si el modelo siempre predice cero
-                        diverse_test = np.array([
-                            [255, 0, 0],      # Rojo puro
-                            [0, 255, 0],      # Verde puro  
-                            [0, 0, 255],      # Azul puro
-                            [128, 128, 128],  # Gris medio
-                            [243, 239, 229]   # Nuestro caso problemático
-                        ])
-                        
-                        diverse_enhanced = self.aplicar_ingenieria_caracteristicas_corregida(diverse_test)
-                        diverse_scaled = self.scaler_actual.transform(diverse_enhanced)
-                        diverse_pred = self.modelo_actual.predict(diverse_scaled)
-                        
-                        st.info("🔍 PREDICCIONES DE TEST:")
-                        for i, rgb in enumerate(diverse_test):
-                            st.info(f"  RGB{rgb} → {diverse_pred[i]}")
-                            
-                        # Verificar si todas las predicciones son cero
-                        if np.all(diverse_pred == 0):
-                            st.error("🚨 PROBLEMA CRÍTICO: El modelo predice CERO para todos los colores")
-                            st.warning("💡 Se activará el modo fallback automáticamente")
-                        else:
-                            st.success("✅ Modelo funcionando correctamente")
-                            
-                except Exception as e:
-                    st.error(f"❌ Error en transformación/predicción: {e}")
-            else:
-                st.error("❌ No hay scaler cargado")
     
     def cargar_modelos(self):
         """Cargar modelos específicos para 600 y 1200 DPI"""
@@ -395,144 +340,85 @@ class CMYKRGConverterCompleto:
         img_resized = img_pil.resize((new_width, new_height), Image.Resampling.LANCZOS)
         return np.array(img_resized), True
     
-    def aplicar_ingenieria_caracteristicas_corregida(self, X):
-        """VERSIÓN CORREGIDA con mejor normalización"""
+    def aplicar_ingenieria_caracteristicas(self, X):
+        """EXACTAMENTE LA MISMA ingeniería de características que en la versión original"""
         if len(X.shape) == 1:
             X = X.reshape(1, -1)
         
-        # Normalizar RGB a [0,1] primero - CORRECCIÓN CLAVE
-        X_normalized = X / 255.0
+        intensity = X.mean(axis=1).reshape(-1, 1)
+        saturation = (X.max(axis=1) - X.min(axis=1)).reshape(-1, 1)
         
-        intensity = X_normalized.mean(axis=1).reshape(-1, 1)
-        saturation = (X_normalized.max(axis=1) - X_normalized.min(axis=1)).reshape(-1, 1)
+        sum_rgb = X.sum(axis=1) + 1e-8
+        dominance_r = (X[:, 0] / sum_rgb).reshape(-1, 1)
+        dominance_g = (X[:, 1] / sum_rgb).reshape(-1, 1)
+        dominance_b = (X[:, 2] / sum_rgb).reshape(-1, 1)
         
-        sum_rgb = X_normalized.sum(axis=1) + 1e-8
-        dominance_r = (X_normalized[:, 0] / sum_rgb).reshape(-1, 1)
-        dominance_g = (X_normalized[:, 1] / sum_rgb).reshape(-1, 1)
-        dominance_b = (X_normalized[:, 2] / sum_rgb).reshape(-1, 1)
-        
-        red_channel = X_normalized[:, 0].reshape(-1, 1)
-        green_channel = X_normalized[:, 1].reshape(-1, 1)
-        blue_channel = X_normalized[:, 2].reshape(-1, 1)
+        red_channel = X[:, 0].reshape(-1, 1)
+        green_channel = X[:, 1].reshape(-1, 1)
+        blue_channel = X[:, 2].reshape(-1, 1)
         
         luminance = (0.299 * red_channel + 0.587 * green_channel + 0.114 * blue_channel).reshape(-1, 1)
         
-        # Características adicionales para mejorar sensibilidad
         rg_diff = (red_channel - green_channel).reshape(-1, 1)
         rb_diff = (red_channel - blue_channel).reshape(-1, 1)
         gb_diff = (green_channel - blue_channel).reshape(-1, 1)
         
-        # Features polinomiales para capturar no linealidades
-        red_squared = red_channel ** 2
-        green_squared = green_channel ** 2
-        blue_squared = blue_channel ** 2
-        
         X_enhanced = np.hstack([
-            X_normalized,  # RGB normalizado
-            intensity, saturation, luminance,
+            X, intensity, saturation, luminance,
             dominance_r, dominance_g, dominance_b,
             rg_diff, rb_diff, gb_diff,
-            red_squared, green_squared, blue_squared,
+            red_channel**2, green_channel**2, blue_channel**2,
             np.sqrt(np.maximum(red_channel, 0)),
             np.sqrt(np.maximum(green_channel, 0)),
             np.sqrt(np.maximum(blue_channel, 0)),
             red_channel * green_channel,
             red_channel * blue_channel,
-            green_channel * blue_channel,
-            np.exp(-intensity),  # Feature adicional para bajas intensidades
-            1.0 - intensity      # Inverso de intensidad
+            green_channel * blue_channel
         ])
         
         X_enhanced = np.nan_to_num(X_enhanced, nan=0.0, posinf=0.0, neginf=0.0)
         
         if st.session_state.tipo_usuario == "tecnico":
-            st.info(f"🔧 Ingeniería de características CORREGIDA: {X.shape[1]} → {X_enhanced.shape[1]} características")
+            st.info(f"🔧 Ingeniería de características: {X.shape[1]} → {X_enhanced.shape[1]} características")
         
         return X_enhanced
 
     # =============================================================================
-    # MÉTODO FALLBACK PARA CUANDO EL MODELO FALLA
-    # =============================================================================
-    
-    def metodo_fallback_basado_en_rgb(self, img_array):
-        """Método alternativo cuando el modelo predice solo ceros"""
-        if st.session_state.tipo_usuario == "tecnico":
-            st.warning("🔄 ACTIVANDO MÉTODO FALLBACK BASADO EN RGB")
-        
-        img_normalized = img_array.astype(np.float32) / 255.0
-        height, width = img_normalized.shape[:2]
-        
-        # Convertir RGB a CMYK aproximado (método simple)
-        c = 1.0 - img_normalized[:,:,0]  # Cian = 1 - Rojo
-        m = 1.0 - img_normalized[:,:,1]  # Magenta = 1 - Verde  
-        y = 1.0 - img_normalized[:,:,2]  # Amarillo = 1 - Azul
-        
-        # Negro = mínimo de CMY
-        k = np.minimum(np.minimum(c, m), y)
-        
-        # Ajustar CMY restando el componente K
-        c_adj = np.clip((c - k) / (1 - k + 1e-8), 0, 1)
-        m_adj = np.clip((m - k) / (1 - k + 1e-8), 0, 1)
-        y_adj = np.clip((y - k) / (1 - k + 1e-8), 0, 1)
-        
-        # Rojo y Verde (simplificado) - para colores especiales
-        r_special = np.maximum(0, img_normalized[:,:,0] - 0.5 * (img_normalized[:,:,1] + img_normalized[:,:,2]))
-        g_special = np.maximum(0, img_normalized[:,:,1] - 0.5 * (img_normalized[:,:,0] + img_normalized[:,:,2]))
-        
-        # Combinar y escalar a porcentaje
-        cmykrg = np.stack([c_adj, m_adj, y_adj, k, r_special, g_special], axis=-1)
-        cmykrg = np.clip(cmykrg * 100, 0, 100)  # Convertir a porcentaje
-        
-        # Aplanar para coincidir con formato esperado
-        cmykrg_flat = cmykrg.reshape(-1, 6)
-        
-        if st.session_state.tipo_usuario == "tecnico":
-            # Mostrar muestra de predicciones fallback
-            st.info("🔍 MUESTRA PREDICCIONES FALLBACK (primeros 5 píxeles):")
-            for i in range(min(5, len(cmykrg_flat))):
-                st.info(f"  Pixel {i}: {cmykrg_flat[i]}")
-        
-        return cmykrg_flat
-
-    # =============================================================================
-    # MÉTODOS DE FILTRADO DE BLANCOS - CORREGIDOS
+    # MÉTODOS DE FILTRADO DE BLANCOS - VERSIÓN OPTIMIZADA
     # =============================================================================
     
     def aplicar_filtro_blancos_tolerancia(self, img_array, cmykrg_predictions, tolerancia=5):
-        """Versión mejorada - solo filtra píxeles que son realmente blancos puros"""
+        """Filtra blancos puros y casi blancos - VERSIÓN OPTIMIZADA"""
         height, width = img_array.shape[:2]
         total_pixels_img = height * width
         total_pixels_pred = len(cmykrg_predictions)
         
-        # Verificar coincidencia de dimensiones
+        # Si las dimensiones coinciden, aplicar filtro
         if total_pixels_img == total_pixels_pred:
             img_flat = img_array.reshape(-1, 3)
             
-            # ✅ CORRECCIÓN: Solo filtrar píxeles que son BLANCO PURO (255,255,255)
-            # No filtrar píxeles casi-blancos que podrían tener tinta
-            blancos_mask = np.all(img_flat == 255, axis=1)
+            # ✅ VERSIÓN OPTIMIZADA: Usar condiciones combinadas
+            # Filtrar píxeles donde TODOS los canales son 254 o 255
+            blancos_mask = np.all((img_flat == 254) | (img_flat == 255), axis=1)
             
             if np.any(blancos_mask):
+                # Aplicar filtro - poner cobertura 0% en píxeles blancos y casi blancos
                 cmykrg_predictions[blancos_mask] = 0
-                porcentaje_blancos = (np.sum(blancos_mask) / len(blancos_mask)) * 100
                 
+                # Solo mostrar info si es técnico
                 if st.session_state.tipo_usuario == "tecnico":
-                    st.info(f"🎯 Píxeles blancos puros detectados: {porcentaje_blancos:.1f}% -> Cobertura 0%")
-                
-                # ✅ DIAGNÓSTICO: Mostrar información sobre píxeles no-blancos
-                no_blancos_mask = ~blancos_mask
-                if np.any(no_blancos_mask):
-                    píxeles_no_blancos = np.sum(no_blancos_mask)
-                    porcentaje_no_blancos = (píxeles_no_blancos / len(no_blancos_mask)) * 100
+                    píxeles_blancos = np.sum(blancos_mask)
+                    porcentaje_blancos = (píxeles_blancos / len(blancos_mask)) * 100
                     
-                    if st.session_state.tipo_usuario == "tecnico":
-                        st.info(f"🔍 Píxeles con tinta detectados: {píxeles_no_blancos:,} ({porcentaje_no_blancos:.1f}%)")
-            else:
-                if st.session_state.tipo_usuario == "tecnico":
-                    st.info("🔍 No se detectaron píxeles blancos puros - procesando toda la imagen")
-        else:
-            if st.session_state.tipo_usuario == "tecnico":
-                st.warning(f"⚠️ No se aplicó filtro blancos: dim. no coinciden ({total_pixels_img} vs {total_pixels_pred})")
+                    # Contar blancos puros separadamente
+                    blancos_puros = np.all(img_flat == 255, axis=1)
+                    píxeles_puros = np.sum(blancos_puros)
+                    píxeles_casi_blancos = píxeles_blancos - píxeles_puros
+                    
+                    st.success(f"✅ Filtro blancos aplicado:")
+                    st.success(f"   - Píxeles blancos puros (255,255,255): {píxeles_puros:,}")
+                    st.success(f"   - Píxeles casi blancos (combinaciones 254/255): {píxeles_casi_blancos:,}")
+                    st.success(f"   - Total filtrado: {píxeles_blancos:,} píxeles ({porcentaje_blancos:.1f}%)")
         
         return cmykrg_predictions
 
@@ -589,7 +475,7 @@ class CMYKRGConverterCompleto:
         return np.clip(img, 0, 100)
 
     # =============================================================================
-    # MÉTODO PRINCIPAL CORREGIDO - CON DETECCIÓN DE FALLOS
+    # MÉTODO PRINCIPAL CORREGIDO - CON 3 TIPOS DE DISTRIBUCIÓN
     # =============================================================================
     
     def get_distribucion_gotas(self, cobertura_canal):
@@ -615,7 +501,7 @@ class CMYKRGConverterCompleto:
         return distribucion
     
     def calcular_consumo_con_modelo_completo(self, cmykrg_predictions, img_shape, resolucion_y, image, filename):
-        """VERSIÓN CORREGIDA - con detección de predicciones cero"""
+        """VERSIÓN CORREGIDA - usa distribución seleccionada por tipo de trabajo"""
         
         # ✅ DIAGNÓSTICO MEJORADO - Verificar qué está pasando con las predicciones
         def verificar_predicciones(cmykrg_predictions, img_array, sample_size=10):
@@ -637,14 +523,6 @@ class CMYKRGConverterCompleto:
             porcentaje_con_cobertura = (pixeles_con_cobertura / total_pixels) * 100
             st.info(f"  - Píxeles con cobertura >1%: {pixeles_con_cobertura:,} ({porcentaje_con_cobertura:.2f}%)")
             
-            # Verificar si TODAS las predicciones son cero
-            if np.all(cmykrg_predictions == 0):
-                st.error("🚨 CRÍTICO: Todas las predicciones son CERO!")
-                return False
-            else:
-                st.success("✅ Predicciones válidas detectadas")
-                return True
-            
             # Muestra una muestra de píxeles y sus predicciones
             st.info("🔍 MUESTRA DE PÍXELES (primeros {}):".format(sample_size))
             img_flat = img_array.reshape(-1, 3)
@@ -653,22 +531,10 @@ class CMYKRGConverterCompleto:
                 rgb = img_flat[i]
                 pred = cmykrg_predictions[i]
                 st.info(f"  Pixel {i}: RGB{rgb} -> CMYKRG{pred}")
-
-        # ✅ EJECUTAR DIAGNÓSTICO
-        predicciones_validas = True
+        
+        # ✅ DIAGNÓSTICO COMPLETO
         if st.session_state.tipo_usuario == "tecnico":
-            predicciones_validas = verificar_predicciones(cmykrg_predictions, np.array(image))
-
-        # ✅ SI LAS PREDICCIONES SON TODAS CERO, USAR FALLBACK
-        if not predicciones_validas or np.all(cmykrg_predictions == 0):
-            st.error("🚨 ACTIVANDO MODO FALLBACK - Modelo principal no funciona")
-            cmykrg_predictions = self.metodo_fallback_basado_en_rgb(np.array(image))
-            
-            # Verificar que el fallback funcionó
-            if np.all(cmykrg_predictions == 0):
-                st.error("❌ FALLBACK TAMBIÉN FALLÓ - Usando valores mínimos")
-                # Asignar cobertura mínima para evitar división por cero
-                cmykrg_predictions = np.ones_like(cmykrg_predictions) * 0.1
+            verificar_predicciones(cmykrg_predictions, np.array(image))
 
         # 1. CALCULAR PUNTOS DE IMPRESIÓN POR m²
         dpi_x = float(resolucion_x)
@@ -770,16 +636,15 @@ class CMYKRGConverterCompleto:
             'metodo': 'MODELO_COMPLETO_CORREGIDO',
             'tipo_trabajo': self.tipo_trabajo_actual,
             'tamanos_gota_utilizados': f"{self.tamanos_gota['pequena']}pl, {self.tamanos_gota['mediana']}pl, {self.tamanos_gota['grande']}pl",
-            'puntos_por_m2': puntos_por_m2,
-            'usando_fallback': not predicciones_validas
+            'puntos_por_m2': puntos_por_m2
         }
 
     # =============================================================================
-    # MÉTODOS DE PROCESAMIENTO PRINCIPAL - ACTUALIZADOS
+    # MÉTODOS DE PROCESAMIENTO PRINCIPAL
     # =============================================================================
     
     def procesar_imagen_completa(self, uploaded_file, resolucion_y, batch_size=10000):
-        """Procesamiento completo con detección de fallos y fallback"""
+        """Procesamiento completo con distribución seleccionada"""
         try:
             progress_bar = st.progress(0)
             status_text = st.empty()
@@ -821,26 +686,16 @@ class CMYKRGConverterCompleto:
                 progress_bar.progress(int(progress))
                 
                 batch_pixels = img_optimized.reshape(-1, 3)[start_idx:end_idx]
-                batch_enhanced = self.aplicar_ingenieria_caracteristicas_corregida(batch_pixels)
-                
-                if self.scaler_actual:
-                    batch_scaled = self.scaler_actual.transform(batch_enhanced)
-                    batch_pred = self.modelo_actual.predict(batch_scaled)
-                    batch_predictions.append(batch_pred)
-                else:
-                    st.error("❌ No hay scaler disponible")
-                    return None
+                batch_enhanced = self.aplicar_ingenieria_caracteristicas(batch_pixels)
+                batch_scaled = self.scaler_actual.transform(batch_enhanced)
+                batch_pred = self.modelo_actual.predict(batch_scaled)
+                batch_predictions.append(batch_pred)
             
             status_text.text("Combinando predicciones...")
             progress_bar.progress(70)
             
             cmykrg_predictions = np.vstack(batch_predictions)
             cmykrg_predictions = np.clip(cmykrg_predictions, 0, 100)
-            
-            # ✅ DETECTAR SI TODAS LAS PREDICCIONES SON CERO
-            if np.all(cmykrg_predictions == 0):
-                st.error("🚨 EL MODELO PREDICE SOLO CEROS - ACTIVANDO FALLBACK")
-                cmykrg_predictions = self.metodo_fallback_basado_en_rgb(img_optimized)
             
             # APLICAR FILTROS
             status_text.text("Aplicando optimizaciones...")
@@ -900,8 +755,7 @@ class CMYKRGConverterCompleto:
             'error_msg': error_msg,
             'consumo_total': resultados['total_g_m2'] if resultados and exito else None,
             'area_m2': resultados['area_m2'] if resultados and exito else None,
-            'tipo_trabajo': resultados.get('tipo_trabajo', 'comercial') if resultados else None,
-            'usando_fallback': resultados.get('usando_fallback', False) if resultados else False
+            'tipo_trabajo': resultados.get('tipo_trabajo', 'comercial') if resultados else None
         }
         
         st.session_state.historial_procesamientos.insert(0, log_entry)
@@ -932,17 +786,13 @@ class CMYKRGConverterCompleto:
         
         historial_data = []
         for log in st.session_state.historial_procesamientos[:20]:
-            estado = '✅ Éxito' if log['exito'] else '❌ Error'
-            if log.get('usando_fallback', False):
-                estado = '🔄 Fallback'
-                
             historial_data.append({
                 'Fecha/Hora': log['timestamp'],
                 'Archivo': log['archivo_nombre'],
                 'Usuario': log['usuario'],
                 'Resolución': log['resolucion'],
                 'Tipo Trabajo': log.get('tipo_trabajo', 'comercial'),
-                'Estado': estado,
+                'Estado': '✅ Éxito' if log['exito'] else '❌ Error',
                 'Consumo (g/m²)': f"{log['consumo_total']:.2f}" if log['consumo_total'] else 'N/A',
                 'Tamaño': f"{log['archivo_tamaño']:,} bytes"
             })
@@ -992,137 +842,78 @@ class CMYKRGConverterCompleto:
                 pass
 
     # =============================================================================
-    # INTERFAZ CONFIGURACIÓN - CON 3 TIPOS DE TRABAJO (CORREGIDO)
+    # INTERFAZ CONFIGURACIÓN - SIMPLIFICADA Y CORREGIDA
     # =============================================================================
     
     def mostrar_configuracion_trabajo(self):
-        """Interfaz para seleccionar tipo de trabajo (solo técnicos)"""
+        """Interfaz simplificada para seleccionar tipo de trabajo"""
         if st.session_state.tipo_usuario != "tecnico":
             return
         
         st.markdown("---")
         st.subheader("🎯 Configuración de Tipo de Trabajo")
         
-        # ✅ CORRECCIÓN: Usar session_state para persistir la selección
-        if 'tipo_trabajo_seleccionado' not in st.session_state:
-            st.session_state.tipo_trabajo_seleccionado = self.tipo_trabajo_actual
-        
         # Seleccionar tipo de trabajo
         tipo_trabajo = st.selectbox(
             "Tipo de trabajo:",
             ["comercial", "fotografia", "industrial"],
-            index=["comercial", "fotografia", "industrial"].index(st.session_state.tipo_trabajo_seleccionado),
+            index=["comercial", "fotografia", "industrial"].index(self.tipo_trabajo_actual),
             help="Define la estrategia de distribución de gotas"
         )
         
-        # Actualizar la selección en session_state
-        st.session_state.tipo_trabajo_seleccionado = tipo_trabajo
-        
-        # Mostrar detalles de la distribución seleccionada
-        st.info(f"**Distribución {tipo_trabajo.upper()}:**")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.write("**Baja cobertura (<20%):**")
-            dist = self.distribuciones[tipo_trabajo]['baja']
-            st.write(f"Pequeñas: {dist[0]*100:.0f}%")
-            st.write(f"Medianas: {dist[1]*100:.0f}%")
-            st.write(f"Grandes: {dist[2]*100:.0f}%")
-            
-        with col2:
-            st.write("**Media cobertura (20-50%):**")
-            dist = self.distribuciones[tipo_trabajo]['media']
-            st.write(f"Pequeñas: {dist[0]*100:.0f}%")
-            st.write(f"Medianas: {dist[1]*100:.0f}%")
-            st.write(f"Grandes: {dist[2]*100:.0f}%")
-            
-        with col3:
-            st.write("**Alta cobertura (>50%):**")
-            dist = self.distribuciones[tipo_trabajo]['alta']
-            st.write(f"Pequeñas: {dist[0]*100:.0f}%")
-            st.write(f"Medianas: {dist[1]*100:.0f}%")
-            st.write(f"Grandes: {dist[2]*100:.0f}%")
-        
-        # ✅ CORRECCIÓN: Aplicar configuración inmediatamente sin necesidad de botón
-        if self.tipo_trabajo_actual != tipo_trabajo:
-            self.tipo_trabajo_actual = tipo_trabajo
-            st.success(f"✅ Tipo de trabajo aplicado: {tipo_trabajo.upper()}")
-            st.rerun()
-        
-        # Mostrar configuración actual
-        st.info(f"**Configuración actual:** {self.tipo_trabajo_actual.upper()}")
-        
-        # ✅ CORRECCIÓN: Botón para forzar la actualización si es necesario
-        if st.button("🔄 Actualizar Configuración", key="actualizar_trabajo"):
+        # Aplicar inmediatamente al cambiar
+        if tipo_trabajo != self.tipo_trabajo_actual:
             self.tipo_trabajo_actual = tipo_trabajo
             st.success(f"✅ Tipo de trabajo actualizado: {tipo_trabajo.upper()}")
-            st.rerun()
+    
+        # Mostrar configuración actual
+        st.info(f"**Configuración actual:** {self.tipo_trabajo_actual.upper()}")
 
     def mostrar_configuracion_gotas(self):
-        """Interfaz para configurar tamaños de gota (solo técnicos)"""
+        """Interfaz simplificada para configurar tamaños de gota"""
         if st.session_state.tipo_usuario != "tecnico":
             return
         
         st.markdown("---")
         st.subheader("💧 Configuración de Tamaños de Gota")
         
-        # ✅ CORRECCIÓN: Usar session_state para persistir los valores
-        if 'gota_pequena_temp' not in st.session_state:
-            st.session_state.gota_pequena_temp = self.tamanos_gota['pequena']
-        if 'gota_mediana_temp' not in st.session_state:
-            st.session_state.gota_mediana_temp = self.tamanos_gota['mediana']
-        if 'gota_grande_temp' not in st.session_state:
-            st.session_state.gota_grande_temp = self.tamanos_gota['grande']
-        
         col1, col2, col3 = st.columns(3)
         
         with col1:
             gota_pequena = st.number_input(
                 "Gota pequeña (pl)", 
-                value=st.session_state.gota_pequena_temp, 
+                value=self.tamanos_gota['pequena'],
                 min_value=1.0, 
                 max_value=50.0, 
-                step=0.1,
-                key="gota_pequena_input"
+                step=0.1
             )
-            st.session_state.gota_pequena_temp = gota_pequena
         
         with col2:
             gota_mediana = st.number_input(
                 "Gota mediana (pl)", 
-                value=st.session_state.gota_mediana_temp, 
+                value=self.tamanos_gota['mediana'],
                 min_value=1.0, 
                 max_value=50.0, 
-                step=0.1,
-                key="gota_mediana_input"
+                step=0.1
             )
-            st.session_state.gota_mediana_temp = gota_mediana
         
         with col3:
             gota_grande = st.number_input(
                 "Gota grande (pl)", 
-                value=st.session_state.gota_grande_temp, 
+                value=self.tamanos_gota['grande'],
                 min_value=1.0, 
                 max_value=50.0, 
-                step=0.1,
-                key="gota_grande_input"
+                step=0.1
             )
-            st.session_state.gota_grande_temp = gota_grande
         
-        # ✅ CORRECCIÓN: Aplicar configuración con verificación de cambios
-        config_actual = [self.tamanos_gota['pequena'], self.tamanos_gota['mediana'], self.tamanos_gota['grande']]
-        config_nueva = [gota_pequena, gota_mediana, gota_grande]
-        
-        if config_actual != config_nueva:
-            if st.button("💾 Aplicar Configuración de Gotas", key="aplicar_gotas"):
-                self.tamanos_gota = {
-                    'pequena': gota_pequena,
-                    'mediana': gota_mediana,
-                    'grande': gota_grande
-                }
-                st.success("✅ Configuración de gotas aplicada")
-                st.rerun()
+        # Botón para aplicar cambios
+        if st.button("💾 Aplicar Configuración de Gotas"):
+            self.tamanos_gota = {
+                'pequena': gota_pequena,
+                'mediana': gota_mediana,
+                'grande': gota_grande
+            }
+            st.success("✅ Configuración de gotas aplicada")
         
         # Mostrar configuración actual
         st.info(f"**Configuración actual:** "
@@ -1130,9 +921,9 @@ class CMYKRGConverterCompleto:
                 f"Mediana: {self.tamanos_gota['mediana']}pl, "
                 f"Grande: {self.tamanos_gota['grande']}pl")
 
-    # =============================================================================
-    # INTERFAZ STREAMLIT - ACTUALIZADA CON DETECCIÓN DE FALLOS
-    # =============================================================================
+# =============================================================================
+# INTERFAZ STREAMLIT - ACTUALIZADA
+# =============================================================================
 
     def mostrar_interfaz_principal(self):
         """Interfaz principal de la aplicación"""
@@ -1290,10 +1081,7 @@ class CMYKRGConverterCompleto:
                                 )
                                 st.session_state.ultimos_resultados = resultados
                                 if resultados:
-                                    if resultados.get('usando_fallback', False):
-                                        st.warning(f"⚠️ {uploaded_file.name} procesado con MODO FALLBACK. Ve a la pestaña 'Resultados'")
-                                    else:
-                                        st.success(f"✅ {uploaded_file.name} procesado correctamente! Ve a la pestaña 'Resultados'")
+                                    st.success(f"✅ {uploaded_file.name} procesado correctamente! Ve a la pestaña 'Resultados'")
                                 else:
                                     st.error(f"❌ Error procesando {uploaded_file.name}")
                         
@@ -1347,10 +1135,6 @@ class CMYKRGConverterCompleto:
             st.error("❌ No hay resultados válidos para mostrar")
             return
         
-        # Mostrar advertencia si se usó fallback
-        if resultados.get('usando_fallback', False):
-            st.warning("⚠️ **NOTA:** Estos resultados se calcularon usando el método de respaldo (el modelo principal falló)")
-        
         # Métricas principales (comunes para ambos)
         col1, col2, col3, col4 = st.columns(4)
         
@@ -1383,28 +1167,6 @@ class CMYKRGConverterCompleto:
         st.success(f"🔧 **Tipo de trabajo:** {resultados.get('tipo_trabajo', 'N/A').upper()}")
         
         # Información detallada SOLO para técnicos
-        if st.session_state.tipo_usuario == "tecnico":
-            with st.expander("📋 Detalles del Análisis", expanded=True):
-                col_det1, col_det2 = st.columns(2)
-                
-                with col_det1:
-                    st.write("**Configuración:**")
-                    st.write(f"- Resolución: {resultados['resolucion']}")
-                    st.write(f"- DPI real detectado: {resultados.get('dpi_real', 'N/A')}")
-                    st.write(f"- Dimensiones: {resultados['dimensiones']}")
-                    st.write(f"- Tipo de trabajo: {resultados.get('tipo_trabajo', 'N/A').upper()}")
-                    st.write(f"- Tamaños de gota: {resultados.get('tamanos_gota_utilizados', 'N/A')}")
-                    if 'puntos_por_m2' in resultados:
-                        st.write(f"- Puntos por m²: {resultados['puntos_por_m2']:,.0f}")
-                    st.write(f"- Usando Fallback: {'Sí' if resultados.get('usando_fallback', False) else 'No'}")
-                
-                with col_det2:
-                    st.write("**Especificaciones:**")
-                    st.write(f"- Densidad tinta: {densidad_tinta} g/ml")
-                    st.write(f"- Resolución X fija: {resolucion_x} DPI")
-                    st.write(f"- Factores cabezal: CMYK:2.25, RG:1.15")
-        
-        # Consumo por tinta SOLO para técnicos
         if st.session_state.tipo_usuario == "tecnico" and 'consumos_detallados' in resultados:
             st.subheader("🎨 Consumo Detallado por Tinta")
             
