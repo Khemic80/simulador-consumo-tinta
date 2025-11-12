@@ -224,17 +224,55 @@ class CMYKRGConverterSimple:
             st.info(f"🔐 Modo: {st.session_state.tipo_usuario.upper()}")
         
         self.cargar_modelos()
+
+    def obtener_directorio_modelos(self):
+        """Obtener directorio seguro para modelos"""
+        directorios_posibles = [
+            self.script_dir,
+            os.path.join(os.path.expanduser("~"), "modelos_simulador"),
+            "/tmp/modelos_simulador",  # En sistemas Unix
+            os.path.join(os.getcwd(), "modelos")
+        ]
+        
+        for directorio in directorios_posibles:
+            try:
+                os.makedirs(directorio, exist_ok=True)
+                # Probar escritura
+                test_file = os.path.join(directorio, "test_write.txt")
+                with open(test_file, "w") as f:
+                    f.write("test")
+                os.remove(test_file)
+                
+                # Probar lectura (si hay archivos)
+                pkl_files = glob.glob(os.path.join(directorio, "*.pkl"))
+                if pkl_files:
+                    test_file = pkl_files[0]
+                    if os.access(test_file, os.R_OK):
+                        return directorio
+                return directorio
+            except Exception as e:
+                continue
+        
+        return self.script_dir  # Fallback
     
     def cargar_modelos(self):
-        """Cargar modelos específicos para 600 y 1200 DPI"""
+        """Cargar modelos específicos para 600 y 1200 DPI con mejor manejo de errores"""
         try:
             if st.session_state.tipo_usuario == "tecnico":
                 st.info("🔍 BUSCANDO MODELOS ESPECÍFICOS POR RESOLUCIÓN...")
             
-            pkl_files = glob.glob(os.path.join(self.script_dir, "*.pkl"))
+            # Obtener directorio con permisos
+            modelos_dir = self.obtener_directorio_modelos()
+            pkl_files = glob.glob(os.path.join(modelos_dir, "*.pkl"))
+            
+            # Si no hay en directorio seguro, buscar en script_dir
+            if not pkl_files:
+                pkl_files = glob.glob(os.path.join(self.script_dir, "*.pkl"))
             
             if not pkl_files:
-                st.error("❌ NO se encontraron archivos .pkl en la carpeta del script")
+                st.error("❌ NO se encontraron archivos .pkl en los directorios de búsqueda")
+                if st.session_state.tipo_usuario == "tecnico":
+                    st.info(f"🔍 Directorios buscados: {modelos_dir}, {self.script_dir}")
                 return
             
             if st.session_state.tipo_usuario == "tecnico":
@@ -266,57 +304,92 @@ class CMYKRGConverterSimple:
                         if st.session_state.tipo_usuario == "tecnico":
                             st.success(f"✅ Asignado como modelo 1200 DPI: {os.path.basename(file_path)}")
             
+            # CARGAR CON MEJOR MANEJO DE ERRORES
             if modelo_600_path:
                 try:
-                    model_data = joblib.load(modelo_600_path)
-                    self.modelo_600 = model_data['model']
-                    self.scaler_600 = model_data['scaler']
-                    if st.session_state.tipo_usuario == "tecnico":
-                        st.success(f"✅ Modelo 600 DPI cargado exitosamente")
+                    # Verificar permisos primero
+                    if not os.access(modelo_600_path, os.R_OK):
+                        st.error(f"❌ Sin permisos de lectura para: {modelo_600_path}")
+                        if st.session_state.tipo_usuario == "tecnico":
+                            st.info("💡 Solución: Ejecutar 'chmod 644 *.pkl' o mover archivos a otra ubicación")
+                    else:
+                        if st.session_state.tipo_usuario == "tecnico":
+                            st.info(f"🔧 Cargando modelo 600 DPI: {os.path.basename(modelo_600_path)}")
+                        
+                        model_data = joblib.load(modelo_600_path)
+                        self.modelo_600 = model_data['model']
+                        self.scaler_600 = model_data['scaler']
+                        
+                        if st.session_state.tipo_usuario == "tecnico":
+                            st.success(f"✅ Modelo 600 DPI cargado exitosamente")
+                            st.info(f"🔧 Tipo de modelo: {type(self.modelo_600).__name__}")
+                            st.info(f"🔧 Características esperadas: {self.modelo_600.n_features_in_ if hasattr(self.modelo_600, 'n_features_in_') else 'N/A'}")
                 except Exception as e:
                     if st.session_state.tipo_usuario == "tecnico":
                         st.error(f"❌ Error cargando modelo 600 DPI: {e}")
-            else:
-                if st.session_state.tipo_usuario == "tecnico":
-                    st.warning("❌ Modelo 600 DPI no encontrado")
+                        import traceback
+                        st.code(traceback.format_exc())
             
             if modelo_1200_path:
                 try:
-                    model_data = joblib.load(modelo_1200_path)
-                    self.modelo_1200 = model_data['model']
-                    self.scaler_1200 = model_data['scaler']
-                    if st.session_state.tipo_usuario == "tecnico":
-                        st.success(f"✅ Modelo 1200 DPI cargado exitosamente")
+                    # Verificar permisos primero
+                    if not os.access(modelo_1200_path, os.R_OK):
+                        st.error(f"❌ Sin permisos de lectura para: {modelo_1200_path}")
+                        if st.session_state.tipo_usuario == "tecnico":
+                            st.info("💡 Solución: Ejecutar 'chmod 644 *.pkl' o mover archivos a otra ubicación")
+                    else:
+                        if st.session_state.tipo_usuario == "tecnico":
+                            st.info(f"🔧 Cargando modelo 1200 DPI: {os.path.basename(modelo_1200_path)}")
+                        
+                        model_data = joblib.load(modelo_1200_path)
+                        self.modelo_1200 = model_data['model']
+                        self.scaler_1200 = model_data['scaler']
+                        
+                        if st.session_state.tipo_usuario == "tecnico":
+                            st.success(f"✅ Modelo 1200 DPI cargado exitosamente")
+                            st.info(f"🔧 Tipo de modelo: {type(self.modelo_1200).__name__}")
+                            st.info(f"🔧 Características esperadas: {self.modelo_1200.n_features_in_ if hasattr(self.modelo_1200, 'n_features_in_') else 'N/A'}")
                 except Exception as e:
                     if st.session_state.tipo_usuario == "tecnico":
                         st.error(f"❌ Error cargando modelo 1200 DPI: {e}")
-            else:
-                if st.session_state.tipo_usuario == "tecnico":
-                    st.warning("❌ Modelo 1200 DPI no encontrado")
+                        import traceback
+                        st.code(traceback.format_exc())
             
+            # MODELO UNIVERSAL COMO FALLBACK
             if len(pkl_files) == 1 and (not self.modelo_600 or not self.modelo_1200):
                 universal_model = pkl_files[0]
                 if st.session_state.tipo_usuario == "tecnico":
                     st.info(f"🔄 Cargando modelo universal: {os.path.basename(universal_model)}")
                 try:
-                    model_data = joblib.load(universal_model)
-                    if not self.modelo_600:
-                        self.modelo_600 = model_data['model']
-                        self.scaler_600 = model_data['scaler']
-                        if st.session_state.tipo_usuario == "tecnico":
-                            st.success("✅ Modelo universal asignado a 600 DPI")
-                    if not self.modelo_1200:
-                        self.modelo_1200 = model_data['model']
-                        self.scaler_1200 = model_data['scaler']
-                        if st.session_state.tipo_usuario == "tecnico":
-                            st.success("✅ Modelo universal asignado a 1200 DPI")
+                    if not os.access(universal_model, os.R_OK):
+                        st.error(f"❌ Sin permisos de lectura para modelo universal: {universal_model}")
+                    else:
+                        model_data = joblib.load(universal_model)
+                        if not self.modelo_600:
+                            self.modelo_600 = model_data['model']
+                            self.scaler_600 = model_data['scaler']
+                            if st.session_state.tipo_usuario == "tecnico":
+                                st.success("✅ Modelo universal asignado a 600 DPI")
+                        if not self.modelo_1200:
+                            self.modelo_1200 = model_data['model']
+                            self.scaler_1200 = model_data['scaler']
+                            if st.session_state.tipo_usuario == "tecnico":
+                                st.success("✅ Modelo universal asignado a 1200 DPI")
                 except Exception as e:
                     if st.session_state.tipo_usuario == "tecnico":
                         st.error(f"❌ Error cargando modelo universal: {e}")
-                
+            
+            # RESUMEN FINAL
+            if st.session_state.tipo_usuario == "tecnico":
+                estado_600 = "✅" if self.modelo_600 else "❌"
+                estado_1200 = "✅" if self.modelo_1200 else "❌"
+                st.success(f"🎯 RESUMEN: 600 DPI {estado_600} | 1200 DPI {estado_1200}")
+                    
         except Exception as e:
             if st.session_state.tipo_usuario == "tecnico":
-                st.error(f"❌ Error general: {e}")
+                st.error(f"❌ Error general en carga de modelos: {e}")
+                import traceback
+                st.code(traceback.format_exc())
     
     def actualizar_estado_modelo(self):
         """Actualizar el estado del modelo en la interfaz"""
